@@ -330,6 +330,19 @@
     }
     .budget-item-amount.income  { color: var(--success); }
     .budget-item-amount.expense { color: var(--text); }
+    .cat-bar-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+    .cat-bar-icon {
+      width: 26px; height: 26px; flex-shrink: 0; border-radius: var(--radius-xs);
+      background: var(--surface-2); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cat-bar-icon .ic { width: 13px; height: 13px; color: var(--muted); }
+    .cat-bar-main { flex: 1; min-width: 0; }
+    .cat-bar-top { display: flex; justify-content: space-between; gap: 8px; font-size: .76rem; margin-bottom: 4px; }
+    .cat-bar-name { color: var(--muted); }
+    .cat-bar-amt { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--mono); flex-shrink: 0; }
+    .cat-bar-track { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+    .cat-bar-fill { height: 100%; border-radius: 2px; background: var(--danger); transition: width .4s var(--ease); }
 
     /* ── Progress ── */
     .progress-bar { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
@@ -933,10 +946,17 @@
       <div class="set-row" onclick="askNotify()">
         <div class="set-icon"><svg class="ic"><use href="#i-bell"/></svg></div>
         <div class="set-info">
-          <div class="set-name">開啟番茄鐘通知</div>
-          <div class="set-desc" id="notifyStatus">計時結束時通知你</div>
+          <div class="set-name">開啟通知</div>
+          <div class="set-desc" id="notifyStatus">番茄鐘結束、晚間習慣未打卡、物品即將到期時通知你</div>
         </div>
         <div class="set-arrow">›</div>
+      </div>
+      <div class="set-row" style="cursor:default">
+        <div class="set-icon"><svg class="ic"><use href="#i-clock"/></svg></div>
+        <div class="set-info">
+          <div class="set-name">提醒僅在 App 開啟時檢查</div>
+          <div class="set-desc">純網頁 / WebView 沒有背景推播能力，App 關閉時不會收到通知</div>
+        </div>
       </div>
     </div>
 
@@ -979,6 +999,12 @@
         </select>
         <button class="add-btn" onclick="addTodo()">＋</button>
       </div>
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+        <span style="font-size:.7rem;color:var(--subtle);flex-shrink:0">重複</span>
+        <button onclick="setTodoRepeat('none',this)" class="chip active-chip todo-repeat-chip" data-repeat="none">不重複</button>
+        <button onclick="setTodoRepeat('daily',this)" class="chip todo-repeat-chip" data-repeat="daily">每天</button>
+        <button onclick="setTodoRepeat('weekly',this)" class="chip todo-repeat-chip" data-repeat="weekly">每週</button>
+      </div>
       <div style="display:flex;gap:8px">
         <button onclick="filterTodo('all')" id="filter-all" class="chip active-chip">全部</button>
         <button onclick="filterTodo('pending')" id="filter-pending" class="chip">待完成</button>
@@ -1020,6 +1046,7 @@
         <button class="btn-full" onclick="addNote()">儲存筆記</button>
       </div>
     </div>
+    <input type="text" id="noteSearch" class="budget-input" style="width:100%;margin-bottom:10px" placeholder="搜尋筆記…" oninput="renderNotes()">
     <div id="notesList"></div>
   </div>
 
@@ -1043,6 +1070,13 @@
         <div class="budget-box-label">結餘</div>
         <div class="budget-box-value" id="budgetBalance">$0</div>
       </div>
+    </div>
+    <div class="card" id="budgetCatCard" style="display:none">
+      <div class="card-title">
+        <svg class="ic"><use href="#i-chart"/></svg>
+        支出分類
+      </div>
+      <div id="budgetCatStats"></div>
     </div>
     <div class="card">
       <div class="card-title">
@@ -1155,6 +1189,7 @@
     </div>
 
     <p class="section-label">我的物品</p>
+    <input type="text" id="itemSearch" class="budget-input" style="width:100%;margin-bottom:10px" placeholder="搜尋物品名稱或位置…" oninput="renderItems()">
     <div class="card" id="itemList">
       <div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>
     </div>
@@ -1241,6 +1276,29 @@ const S = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 };
 
+// 修補資料形狀：手動改過的 localStorage、舊版留下的資料，或匯入時漏檢查到
+// 的邊界情況，都可能讓某個項目缺欄位，導致某個畫面的 render 函式直接壞掉。
+// 開機跑一次補齊，其他地方就不用每個讀取點都各自加防呆。
+function sanitizeStoredData() {
+  let changed = false;
+  const habits = S.get('habits', []);
+  habits.forEach(h => {
+    if (!h.records || typeof h.records !== 'object' || Array.isArray(h.records)) { h.records = {}; changed = true; }
+  });
+  const chals = S.get('challenges', []);
+  chals.forEach(c => {
+    if (!c.records || typeof c.records !== 'object' || Array.isArray(c.records)) { c.records = {}; changed = true; }
+    if (!Number.isFinite(c.days) || c.days < 1) { c.days = 21; changed = true; }
+    if (!c.start || typeof c.start !== 'string') { c.start = todayKey(); changed = true; }
+  });
+  const items = S.get('items', []);
+  items.forEach(it => {
+    if (!Number.isFinite(it.qty)) { it.qty = 0; changed = true; }
+  });
+  if (changed) { S.set('habits', habits); S.set('challenges', chals); S.set('items', items); }
+}
+sanitizeStoredData();
+
 // 已知圖示 id 就畫圖，否則原樣輸出（讓舊資料裡的 emoji 仍能顯示）
 const ICON_IDS = new Set(['run','book','lotus','pill','leaf','moon','pen','music','dumbbell','drop',
   'food','car','bag','home','health','game','dots','briefcase','chart','gift','bulb','coins',
@@ -1268,6 +1326,13 @@ function last7Days() {
     days.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
   }
   return days;
+}
+// 週一為每週起始，回傳該週週一的日期字串，用來判斷兩個時間戳是否同一週
+function isoWeekKey(ts) {
+  const d = new Date(ts);
+  const dow = (d.getDay()+6)%7;   // 週一=0 … 週日=6
+  d.setDate(d.getDate()-dow);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 // ─── Clock / header ───────────────────────────────────────────────────
@@ -1371,16 +1436,24 @@ loadWater();
 
 // ─── Todos ────────────────────────────────────────────────────────────
 let todoFilter = 'all';
+let todoRepeat = 'none';
 const tagLabels = {work:'工作',life:'生活',health:'健康'};
+const repeatLabels = {daily:'每天重複',weekly:'每週重複'};
+function setTodoRepeat(v, btn) {
+  todoRepeat = v;
+  document.querySelectorAll('.todo-repeat-chip').forEach(b=>b.classList.remove('active-chip'));
+  if(btn) btn.classList.add('active-chip');
+}
 function addTodo() {
   const input=document.getElementById('todoInput');
   const tag=document.getElementById('todoTag').value;
   const text=input.value.trim();
   if(!text) return;
   const todos=S.get('todos',[]);
-  todos.unshift({id:Date.now(),text,tag,done:false});
+  todos.unshift({id:Date.now(),text,tag,done:false,repeat:todoRepeat});
   S.set('todos',todos);
   input.value='';
+  setTodoRepeat('none', document.querySelector('.todo-repeat-chip[data-repeat="none"]'));
   renderTodos();
   refreshDashboard();
 }
@@ -1418,10 +1491,28 @@ function renderTodos() {
     <div class="todo-item">
       <div class="todo-check${t.done?' done':''}" onclick="toggleTodo(${t.id})"></div>
       <span class="todo-text${t.done?' done':''}">  ${escHtml(t.text)}</span>
+      ${t.repeat && t.repeat!=='none' ? `<svg class="ic" style="width:11px;height:11px;color:var(--subtle)" title="${repeatLabels[t.repeat]||''}"><use href="#i-refresh"/></svg>` : ''}
       <span class="todo-tag tag-${escHtml(t.tag)}">${escHtml(tagLabels[t.tag]||t.tag)}</span>
       <button class="del-btn" onclick="deleteTodo(${t.id})">✕</button>
     </div>`).join('');
 }
+
+// 重複待辦：完成後如果已經跨過一天／一週，自動恢復成待完成，
+// 這樣使用者不用每天手動把同一件事重新打一次。
+// 只在啟動時檢查一次即可——手機 App 幾乎都是「重新開啟」而非長駐後台跨夜。
+function resetRecurringTodos() {
+  const todos=S.get('todos',[]);
+  const td=todayKey(), wk=isoWeekKey(Date.now());
+  let changed=false;
+  todos.forEach(t=>{
+    if(!t.done || !t.repeat || t.repeat==='none' || !t.doneAt) return;
+    const doneDay=(d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`)(new Date(t.doneAt));
+    if(t.repeat==='daily' && doneDay!==td){ t.done=false; t.doneAt=null; changed=true; }
+    else if(t.repeat==='weekly' && isoWeekKey(t.doneAt)!==wk){ t.done=false; t.doneAt=null; changed=true; }
+  });
+  if(changed) S.set('todos',todos);
+}
+resetRecurringTodos();
 renderTodos();
 
 // ─── Habits ───────────────────────────────────────────────────────────
@@ -1507,7 +1598,10 @@ function renderNotes() {
   const notes=S.get('notes',[]);
   const list=document.getElementById('notesList');
   if(!notes.length){ list.innerHTML='<div class="card"><div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-pen"/></svg></div>尚無筆記</div></div>'; return; }
-  list.innerHTML=notes.map(n=>`
+  const q=(document.getElementById('noteSearch')?.value||'').trim().toLowerCase();
+  const filtered=q?notes.filter(n=>(n.text||'').toLowerCase().includes(q)):notes;
+  if(!filtered.length){ list.innerHTML='<div class="card"><div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>找不到符合的筆記</div></div>'; return; }
+  list.innerHTML=filtered.map(n=>`
     <div class="note-card">
       <button class="del-btn" onclick="deleteNote(${n.id})">✕</button>
       <div class="note-card-text">${escHtml(n.text)}</div>
@@ -1601,6 +1695,7 @@ function renderBudget() {
   document.getElementById('budgetIncome').textContent=money(income);
   document.getElementById('budgetExpense').textContent=money(expense);
   document.getElementById('budgetBalance').textContent=money(balance);
+  renderBudgetCatStats(records, expense);
   const list=document.getElementById('budgetList');
   if(!records.length){ list.innerHTML='<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-wallet"/></svg></div>這個月還沒有記錄</div>'; return; }
   list.innerHTML=records.map(r=>`
@@ -1613,6 +1708,35 @@ function renderBudget() {
       <div class="budget-item-amount ${r.type}">${r.type==='income'?'+':'-'}$${r.amount.toLocaleString()}</div>
       <button class="del-btn" onclick="deleteBudget(${r.id})">✕</button>
     </div>`).join('');
+}
+
+// 支出分類統計：只看支出（收入分類較少，混在一起意義不大），依金額排序
+function renderBudgetCatStats(records, expenseTotal) {
+  const card = document.getElementById('budgetCatCard');
+  const el = document.getElementById('budgetCatStats');
+  if (!card || !el) return;
+  const byCat = {};
+  records.forEach(r => {
+    if (r.type !== 'expense') return;
+    const label = catLabel(r.cat);
+    byCat[label] = (byCat[label] || 0) + r.amount;
+  });
+  const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  if (!rows.length || !expenseTotal) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  el.innerHTML = rows.map(([label, amt]) => {
+    const pct = Math.round(amt / expenseTotal * 100);
+    return `<div class="cat-bar-row">
+      <div class="cat-bar-icon">${catIcon(label)}</div>
+      <div class="cat-bar-main">
+        <div class="cat-bar-top">
+          <span class="cat-bar-name">${escHtml(label)}</span>
+          <span class="cat-bar-amt">$${amt.toLocaleString()}　${pct}%</span>
+        </div>
+        <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>`;
+  }).join('');
 }
 renderBudget();
 
@@ -1669,7 +1793,7 @@ refreshDashboard();
 
 // ─── Escape ───────────────────────────────────────────────────────────
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ─── Daily Quotes ─────────────────────────────────────────────────────
@@ -1844,6 +1968,17 @@ function renderWeekChart() {
 
 // ─── 設定：備份 / 還原 / 通知 / 清除 ──────────────────────────────────
 const DATA_KEYS=['todos','habits','notes','budget','water','moods','challenges','reflects','pomodoros','items'];
+// 每個欄位預期的形狀，匯入時用來擋掉手動改壞或格式不對的備份檔，
+// 避免壞資料進到 localStorage 後在別的畫面把 render 函式炸掉
+const DATA_SHAPES={todos:'array',habits:'array',notes:'array',budget:'array',
+  water:'object',moods:'object',challenges:'array',reflects:'array',
+  pomodoros:'object',items:'array'};
+function shapeOk(key, val) {
+  const shape=DATA_SHAPES[key];
+  if(shape==='array') return Array.isArray(val);
+  if(shape==='object') return val && typeof val==='object' && !Array.isArray(val);
+  return true;
+}
 
 function exportData() {
   const dump={ _app:'我的生活助手', _version:1, _exportedAt:new Date().toISOString() };
@@ -1865,11 +2000,16 @@ function importData(input) {
     let data;
     try { data=JSON.parse(reader.result); }
     catch(e){ alert('檔案格式不正確，請選擇匯出的備份檔'); input.value=''; return; }
-    if(!data || data._app!=='我的生活助手') {
+    if(!data || typeof data!=='object') { alert('檔案內容不是有效的備份資料'); input.value=''; return; }
+    if(data._app!=='我的生活助手') {
       if(!confirm('這個檔案不像是本 App 的備份檔，仍要匯入嗎？')) { input.value=''; return; }
     }
+    const badKeys=DATA_KEYS.filter(k=>data[k]!=null && !shapeOk(k,data[k]));
+    if(badKeys.length) {
+      if(!confirm(`備份檔裡有 ${badKeys.length} 個欄位（${badKeys.join('、')}）格式不正確，會略過不匯入，其餘欄位仍會正常匯入。要繼續嗎？`)) { input.value=''; return; }
+    }
     if(!confirm('匯入會覆蓋目前所有資料，確定嗎？')) { input.value=''; return; }
-    DATA_KEYS.forEach(k=>{ if(data[k]!=null) S.set(k,data[k]); });
+    DATA_KEYS.forEach(k=>{ if(data[k]!=null && shapeOk(k,data[k])) S.set(k,data[k]); });
     input.value='';
     alert('匯入完成');
     location.reload();
@@ -1884,7 +2024,7 @@ function askNotify() {
     alert('通知已被封鎖，請到瀏覽器設定中重新允許本網站的通知');
     return;
   }
-  Notification.requestPermission().then(()=>updateNotifyStatus());
+  Notification.requestPermission().then(()=>{ updateNotifyStatus(); if(typeof checkReminders==='function') checkReminders(); });
 }
 
 function updateNotifyStatus() {
@@ -1894,7 +2034,7 @@ function updateNotifyStatus() {
   el.textContent =
     Notification.permission==='granted' ? '已開啟' :
     Notification.permission==='denied'  ? '已封鎖，請到瀏覽器設定開啟' :
-    '點擊開啟，計時結束時通知你';
+    '點擊開啟，番茄鐘結束、晚間習慣未打卡、物品即將到期時通知你';
 }
 
 function renderDataStats() {
@@ -2336,9 +2476,15 @@ function sheetItem(code, format) {
           <input class="budget-input" id="skPlace" style="width:100%" placeholder="冰箱 / 儲藏室">
         </div>
       </div>
-      <div class="sheet-field">
-        <div class="sheet-label">到期日（選填）</div>
-        <input class="budget-input" id="skExp" type="date" style="width:100%">
+      <div class="sheet-row">
+        <div class="sheet-field" style="flex:1">
+          <div class="sheet-label">到期日（選填）</div>
+          <input class="budget-input" id="skExp" type="date" style="width:100%">
+        </div>
+        <div class="sheet-field" style="flex:0 0 100px">
+          <div class="sheet-label">低庫存提醒</div>
+          <input class="budget-input" id="skLowAt" type="number" min="0" placeholder="數量" style="width:100%">
+        </div>
       </div>
       <div class="sheet-btns">
         <button class="btn-ghost" onclick="closeSheet()">取消</button>
@@ -2353,11 +2499,13 @@ function saveScannedItem() {
   const name = document.getElementById('skName').value.trim();
   if (!name) { document.getElementById('skName').focus(); return; }
   const items = S.get('items', []);
+  const lowAt = parseInt(document.getElementById('skLowAt').value, 10);
   items.unshift({
     id: Date.now(), name, barcode: code,
     qty: Math.max(1, parseInt(document.getElementById('skQty').value, 10) || 1),
     place: document.getElementById('skPlace').value.trim(),
     expiry: document.getElementById('skExp').value || '',
+    lowAt: Number.isFinite(lowAt) && lowAt > 0 ? lowAt : 0,
     ts: Date.now()
   });
   S.set('items', items);
@@ -2439,7 +2587,15 @@ function renderItems() {
     list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>';
     return;
   }
-  list.innerHTML = items.map(it => {
+  const q = (document.getElementById('itemSearch')?.value || '').trim().toLowerCase();
+  const filtered = q ? items.filter(it =>
+    (it.name || '').toLowerCase().includes(q) || (it.place || '').toLowerCase().includes(q)
+  ) : items;
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>找不到符合的物品</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(it => {
     const dLeft = daysUntil(it.expiry);
     let expTxt = '';
     if (dLeft !== null) {
@@ -2448,7 +2604,8 @@ function renderItems() {
       else if (dLeft <= 7) expTxt = `<span class="soon">${dLeft} 天後到期</span>`;
       else                 expTxt = `${it.expiry} 到期`;
     }
-    const meta = [escHtml(it.place), expTxt, it.barcode ? '<svg class="ic" style="width:11px;height:11px;opacity:.55"><use href="#i-camera"/></svg>' : ''].filter(Boolean).join(' · ');
+    const lowTxt = (it.lowAt && it.qty <= it.lowAt) ? '<span class="warn">庫存偏低</span>' : '';
+    const meta = [escHtml(it.place), lowTxt, expTxt, it.barcode ? '<svg class="ic" style="width:11px;height:11px;opacity:.55"><use href="#i-camera"/></svg>' : ''].filter(Boolean).join(' · ');
     return `<div class="item-row">
       <div class="item-qty">${it.qty}</div>
       <div class="item-info">
@@ -2489,7 +2646,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-18b';
+const CONTENT_VERSION = '2026-09-18c';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -2517,6 +2674,57 @@ window.__busy = function () {
       || document.getElementById('sheet')?.classList.contains('on'));
   } catch (e) { return false; }
 };
+
+// ─── 提醒通知（習慣未打卡 / 物品即將到期）──────────────────────────────
+// 純前端 App、資料只存在裝置上，沒有伺服器可以做背景推播，所以只能在
+// App 開啟、或留在前景時定期檢查一次，沒辦法像原生鬧鐘一樣關掉 App 也會響。
+// 用 reminderLog 記錄「今天這個類別已經提醒過」，同一天不會重複打擾。
+function notify(title, body) {
+  try { if (navigator.vibrate) navigator.vibrate(120); } catch (e) {}
+  try {
+    if (window.Notification && Notification.permission === 'granted') {
+      new Notification(title, { body, icon: 'icon.svg' });
+    }
+  } catch (e) {}
+}
+function reminderFiredToday(key) {
+  return (S.get('reminderLog', {}))[todayKey() + '_' + key] === true;
+}
+function markReminderFired(key) {
+  const log = S.get('reminderLog', {});
+  const td = todayKey();
+  Object.keys(log).forEach(k => { if (!k.startsWith(td + '_')) delete log[k]; });
+  log[td + '_' + key] = true;
+  S.set('reminderLog', log);
+}
+function checkReminders() {
+  if (!window.Notification || Notification.permission !== 'granted') return;
+  const now = new Date();
+
+  // 太早提醒沒意義，晚上 8 點後才提醒還沒打卡的習慣
+  if (now.getHours() >= 20 && !reminderFiredToday('habit')) {
+    const habits = S.get('habits', []);
+    const td = todayKey();
+    const undone = habits.filter(h => !h.records[td]);
+    if (undone.length) {
+      notify('習慣還沒打卡', `${undone.map(h => h.name).slice(0, 3).join('、')} 等 ${undone.length} 個習慣今天還沒打卡`);
+      markReminderFired('habit');
+    }
+  }
+
+  // 物品到期：一天檢查一次就夠
+  if (!reminderFiredToday('items')) {
+    const items = S.get('items', []);
+    const urgent = items.filter(it => { const d = daysUntil(it.expiry); return d !== null && d <= 3; });
+    if (urgent.length) {
+      notify('有物品即將到期', `${urgent.map(it => it.name).slice(0, 3).join('、')} 等 ${urgent.length} 項即將到期或已過期`);
+      markReminderFired('items');
+    }
+  }
+}
+checkReminders();
+setInterval(checkReminders, 15 * 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminders(); });
 
 // ─── 掃描診斷 ─────────────────────────────────────────────────────────
 // 相機正常卻掃不到時，用來判斷是哪一層失效
