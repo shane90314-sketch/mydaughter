@@ -1418,7 +1418,7 @@ function renderTodos() {
     <div class="todo-item">
       <div class="todo-check${t.done?' done':''}" onclick="toggleTodo(${t.id})"></div>
       <span class="todo-text${t.done?' done':''}">  ${escHtml(t.text)}</span>
-      <span class="todo-tag tag-${t.tag}">${tagLabels[t.tag]||t.tag}</span>
+      <span class="todo-tag tag-${escHtml(t.tag)}">${escHtml(tagLabels[t.tag]||t.tag)}</span>
       <button class="del-btn" onclick="deleteTodo(${t.id})">✕</button>
     </div>`).join('');
 }
@@ -1662,7 +1662,7 @@ function refreshDashboard() {
     <div class="todo-item">
       <div class="todo-check${t.done?' done':''}" onclick="toggleTodo(${t.id});refreshDashboard()"></div>
       <span class="todo-text">${escHtml(t.text)}</span>
-      <span class="todo-tag tag-${t.tag}">${tagLabels[t.tag]||t.tag}</span>
+      <span class="todo-tag tag-${escHtml(t.tag)}">${escHtml(tagLabels[t.tag]||t.tag)}</span>
     </div>`).join('');
 }
 refreshDashboard();
@@ -2309,6 +2309,7 @@ function saveInvoice() {
 
 // ─── 條碼 → 物品 ──────────────────────────────────────────────────────
 function sheetItem(code, format) {
+  window.__pendingScanCode = code;   // 避免把掃到的原始內容直接內插進 onclick 字串（可能被當成 JS 執行）
   const known = S.get('items', []).find(x => x.barcode === code);
   openSheet(`
     <div class="sheet-title"><svg class="ic"><use href="#i-box"/></svg>${known ? '這個物品已在清單中' : '新增物品'}</div>
@@ -2341,13 +2342,14 @@ function sheetItem(code, format) {
       </div>
       <div class="sheet-btns">
         <button class="btn-ghost" onclick="closeSheet()">取消</button>
-        <button class="btn-full" style="flex:1.4" onclick="saveScannedItem('${escHtml(code)}')">加入清單</button>
+        <button class="btn-full" style="flex:1.4" onclick="saveScannedItem()">加入清單</button>
       </div>
     `}
   `);
 }
 
-function saveScannedItem(code) {
+function saveScannedItem() {
+  const code = window.__pendingScanCode || '';
   const name = document.getElementById('skName').value.trim();
   if (!name) { document.getElementById('skName').focus(); return; }
   const items = S.get('items', []);
@@ -2487,7 +2489,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-18a';
+const CONTENT_VERSION = '2026-09-18b';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
