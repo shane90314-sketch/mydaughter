@@ -29,8 +29,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安裝 Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub 的 ubuntu-latest 映像本身就內建 Android SDK（cmdline-tools、
+      # platform-tools 都已就緒），過去用 android-actions/setup-android@v3
+      # 只是為了額外裝 platforms/build-tools 與接受授權條款。
+      #
+      # 該 action 預設會執行 `sdkmanager tools` 去裝舊版獨立 tools 套件，
+      # 但 Google 已把這個套件從 SDK 索引中下架，導致 sdkmanager 直接
+      # 回傳「Failed to find package 'tools'」並以非零狀態結束，建置因此
+      # 完全跑不起來——這跟本次程式碼改動無關，純粹是外部相依過時。
+      #
+      # 改成直接用映像內建的 sdkmanager，只接受授權並裝真正需要的套件，
+      # 不再依賴任何第三方 action。
+      - name: 接受 SDK 授權並安裝所需套件
+        run: |
+          set -e
+          SDKMGR="$(command -v sdkmanager || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: 設定 Gradle
         uses: gradle/actions/setup-gradle@v4
