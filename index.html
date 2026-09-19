@@ -1241,7 +1241,7 @@
     <button class="scan-close" id="torchBtn" onclick="toggleTorch()" style="display:none" aria-label="手電筒">
       <svg viewBox="0 0 24 24"><use href="#i-torch"/></svg>
     </button>
-    <button class="scan-close" onclick="closeScanner()" aria-label="關閉">
+    <button class="scan-close" onclick="cancelScan()" aria-label="關閉">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     </div>
@@ -2144,27 +2144,17 @@ function parseEInvoice(raw) {
   // 品項（讀不到也不影響金額與日期）
   // 77 之後格式：營業人自訂區 : 分隔符號(**…) : 本碼筆數 : 總筆數 : 中文編碼 : 品名:數量:單價 …
   // 自訂區可能有內容也可能空白，所以以「全是 * 的那一段」當定位點，而不是固定索引
-  let items = [];
+  let items = [], encoding = '', itemCount = 0, itemTotal = 0;
   try {
     const rest = s.slice(77);
     if (rest) {
       const parts = rest.split(':');
       const sep = parts.findIndex(p => /^\*+$/.test(p));
       if (sep !== -1) {
-        const encoding = parts[sep + 3];        // 0=Big5 1=UTF-8 2=Base64
-        let body = parts.slice(sep + 4);
-        if (encoding === '2' && body.length) {
-          try {
-            const bin = atob(body.join(':'));
-            const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-            body = new TextDecoder('utf-8').decode(bytes).split(':');
-          } catch (e) { body = []; }
-        }
-        for (let i = 0; i < body.length; i += 3) {
-          const name = (body[i] || '').trim();
-          if (!name) continue;
-          items.push({ name, qty: body[i + 1] || '', price: body[i + 2] || '' });
-        }
+        itemCount = parseInt(parts[sep + 1], 10) || 0;   // 這個 QR 裡有幾項
+        itemTotal = parseInt(parts[sep + 2], 10) || 0;   // 整張發票共幾項
+        encoding = parts[sep + 3];                       // 0=Big5 1=UTF-8 2=Base64
+        items = decodeInvoiceItems(parts.slice(sep + 4), encoding);
       }
     }
   } catch (e) { items = []; }
@@ -2174,8 +2164,40 @@ function parseEInvoice(raw) {
     date: `${year}-${month}-${day}`,
     month: `${year}-${month}`,
     ts: new Date(year, +month - 1, +day, 12, 0, 0).getTime(),
-    total, sales, sellerVat, buyerVat, items
+    total, sales, sellerVat, buyerVat, items,
+    encoding, itemCount, itemTotal
   };
+}
+
+// 品項段落 → 陣列。三個一組：品名、數量、單價
+function decodeInvoiceItems(body, encoding) {
+  if (!Array.isArray(body) || !body.length) return [];
+  if (encoding === '2') {                    // Base64：整段先解回 UTF-8 再切
+    try {
+      const bin = atob(body.join(':'));
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      body = new TextDecoder('utf-8').decode(bytes).split(':');
+    } catch (e) { return []; }
+  }
+  const out = [];
+  for (let i = 0; i < body.length; i += 3) {
+    const name = (body[i] || '').trim();
+    if (!name) continue;
+    out.push({ name, qty: body[i + 1] || '', price: body[i + 2] || '' });
+  }
+  return out;
+}
+
+// 發票證明聯右邊那個 QR：以 ** 開頭，裝的是左碼放不下的品項續篇。
+// 它本身沒有發票號碼、金額等欄位，所以一定要先掃過左碼才有意義。
+// 中文編碼方式沿用左碼宣告的那個。
+function parseInvoiceRightQr(raw, encoding) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s.startsWith('**')) return null;
+  const body = s.slice(2).replace(/^:/, '').split(':');
+  const items = decodeInvoiceItems(body, encoding);
+  return items.length ? items : null;
 }
 
 // ─── 掃描器 ───────────────────────────────────────────────────────────
@@ -2261,9 +2283,11 @@ async function openScanner(mode) {
 
   const el = document.getElementById('scanner');
   const hint = document.getElementById('scanHint');
-  hint.textContent = scanMode === 'barcode'
-    ? '將商品條碼對準框內'
+  hint.textContent = scanMode === 'invoice-right' ? '對準發票右邊那個 QR（品項續篇）'
+    : scanMode === 'barcode' ? '將商品條碼對準框內'
     : '將發票 QR 或商品條碼對準框內';
+  // 上一次補掃沒掃成就離開的話，旗標會留著誤導下一次掃描
+  if (scanMode !== 'invoice-right') awaitingInvoiceRight = false;
   scanNoHitSince = 0;
   scanNativeTried = scanNativeHits = scanFallbackHits = scanQuaggaHits = 0;
   quaggaTickCount = 0; quaggaBusy = false;
@@ -2471,6 +2495,18 @@ async function scanTick() {
 
 // 掃到東西之後，決定要走記帳還是物品
 function handleScan(value, format) {
+  // 正在補掃右邊那個 QR：它只有品項、沒有發票欄位，要接回剛才那張發票
+  if (awaitingInvoiceRight && pendingInvoice) {
+    awaitingInvoiceRight = false;
+    const extra = parseInvoiceRightQr(value, pendingInvoice.encoding);
+    if (extra) {
+      pendingInvoice.items = pendingInvoice.items.concat(extra);
+      sheetInvoice(pendingInvoice);
+    } else {
+      sheetInvoice(pendingInvoice, '那個不是右邊的品項 QR，再對一次試試');
+    }
+    return;
+  }
   const inv = parseEInvoice(value);
   if (inv && scanMode !== 'barcode') { sheetInvoice(inv); return; }
   if (format === 'qr_code' && scanMode !== 'barcode') { sheetUnknown(value); return; }
@@ -2610,23 +2646,44 @@ function closeSheet() {
 // ─── 發票 → 記帳 ──────────────────────────────────────────────────────
 let pendingInvoice = null;
 
-function sheetInvoice(inv) {
+function sheetInvoice(inv, notice) {
   pendingInvoice = inv;
   const dup = S.get('budget', []).some(r => r.invoice === inv.number);
   const itemLines = inv.items.slice(0, 6)
     .map(it => `<div class="kv"><span class="kv-k">${escHtml(it.name)}</span><span class="kv-v">${escHtml(String(it.qty))} × ${escHtml(String(it.price))}</span></div>`)
     .join('');
 
+  // 證明聯上有兩個 QR，品項多的時候會溢出到右邊那個。
+  // 總筆數比手上的多，就代表這張還沒讀完，要提示補掃，不然使用者
+  // 根本不知道自己只拿到一半品項。
+  const missing = Math.max(0, (inv.itemTotal || 0) - inv.items.length);
+
   openSheet(`
     <div class="sheet-title"><svg class="ic"><use href="#i-receipt"/></svg>掃到電子發票</div>
     <div class="sheet-sub">確認後會存成一筆支出</div>
+    ${notice ? `<div class="sheet-sub" style="color:var(--warning)">${escHtml(notice)}</div>` : ''}
     ${dup ? '<div class="sheet-sub" style="color:var(--danger)">這張發票已經記過了，再存會重複。</div>' : ''}
     <div class="sheet-amount">$${inv.total.toLocaleString()}</div>
     <div class="kv"><span class="kv-k">日期</span><span class="kv-v">${inv.date}</span></div>
     <div class="kv"><span class="kv-k">發票號碼</span><span class="kv-v">${escHtml(inv.number)}</span></div>
     ${inv.sellerVat ? `<div class="kv"><span class="kv-k">賣方統編</span><span class="kv-v">${escHtml(inv.sellerVat)}</span></div>` : ''}
-    ${itemLines ? `<div class="sheet-label" style="margin-top:14px">品項</div>${itemLines}` : ''}
+    ${itemLines ? `<div class="sheet-label" style="margin-top:14px">品項${inv.itemTotal ? `（${inv.items.length}/${inv.itemTotal}）` : ''}</div>${itemLines}` : ''}
     ${inv.items.length > 6 ? `<div class="sheet-sub" style="margin-top:6px">…另有 ${inv.items.length - 6} 項</div>` : ''}
+
+    ${missing ? `
+      <div class="sheet-sub" style="margin-top:10px;color:var(--warning)">
+        還有 ${missing} 項在發票右邊那個 QR 裡，沒掃就只會存到一半品項。
+      </div>
+      <button class="btn-ghost" style="width:100%;margin-top:8px" onclick="scanInvoiceRight()">
+        <svg class="ic"><use href="#i-scan"/></svg>補掃右邊的 QR
+      </button>
+    ` : ''}
+
+    ${inv.items.length ? `
+      <button class="btn-ghost" style="width:100%;margin-top:8px" onclick="addInvoiceItemsToStock()">
+        <svg class="ic"><use href="#i-box"/></svg>把這 ${inv.items.length} 項加入物品清單
+      </button>
+    ` : ''}
 
     <div class="sheet-field" style="margin-top:16px">
       <div class="sheet-label">分類</div>
@@ -2644,6 +2701,43 @@ function sheetInvoice(inv) {
       <button class="btn-full" style="flex:1.4" onclick="saveInvoice()">存成支出</button>
     </div>
   `);
+}
+
+// 補掃右碼：關掉面板去開相機，掃到後由 handleScan 接回同一張發票
+let awaitingInvoiceRight = false;
+function scanInvoiceRight() {
+  if (!pendingInvoice) return;
+  awaitingInvoiceRight = true;
+  closeSheet();
+  openScanner('invoice-right');
+}
+
+// 使用者自己關掉相機（不是掃到東西才關的）。
+// 補掃到一半放棄的話要把發票面板還回去，否則剛掃好的那張就這樣不見了。
+function cancelScan() {
+  const wasAwaiting = awaitingInvoiceRight;
+  awaitingInvoiceRight = false;
+  closeScanner();
+  if (wasAwaiting && pendingInvoice) {
+    sheetInvoice(pendingInvoice, '沒有補掃，右邊那些品項這次不會存到');
+  }
+}
+
+// 發票品項 → 物品清單。同名的就累加數量，不重複開一筆。
+function addInvoiceItemsToStock() {
+  const inv = pendingInvoice;
+  if (!inv || !inv.items.length) return;
+  const items = S.get('items', []);
+  const now = Date.now();
+  inv.items.forEach((it, i) => {
+    const qty = Math.max(1, parseInt(it.qty, 10) || 1);
+    const same = items.find(x => x.name === it.name);
+    if (same) { same.qty = (same.qty || 0) + qty; return; }
+    items.unshift({ id: now + i, name: it.name, barcode: '', qty, place: '', expiry: '', ts: now });
+  });
+  S.set('items', items);
+  closeSheet();
+  gotoItems();
 }
 
 function saveInvoice() {
@@ -2921,7 +3015,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19f';
+const CONTENT_VERSION = '2026-09-19g';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
