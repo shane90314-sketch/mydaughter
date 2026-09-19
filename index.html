@@ -966,7 +966,7 @@
         <div class="set-icon"><svg class="ic"><use href="#i-search"/></svg></div>
         <div class="set-info">
           <div class="set-name">掃到條碼自動查商品名稱</div>
-          <div class="set-desc">會把條碼數字送到 Open Food Facts 公開資料庫。關閉時，掃描面板上仍可自己按「查名稱」查一次。</div>
+          <div class="set-desc">會把條碼數字送到 Open Food Facts 家族的四個公開資料庫（食品／一般商品／美妝／寵物食品）查詢。關閉時，掃描面板上仍可自己按「查名稱」查一次。</div>
         </div>
         <button class="switch" id="autoLookupToggle"
                 onclick="event.stopPropagation();toggleAutoLookup()"></button>
@@ -2096,6 +2096,7 @@ function renderDataStats() {
     ['wallet','記帳',S.get('budget',[]).length+' 筆'],
     ['moon','反思',S.get('reflects',[]).length+' 天'],
     ['box','物品',S.get('items',[]).length+' 項'],
+    ['search','商品庫',Object.keys(S.get('barcodeCache',{})).length+' 個條碼'],
     ['timer','今日番茄鐘',pomoTodayCount()+' 個'],
   ];
   el.innerHTML=rows.map(([icon,name,val])=>`
@@ -2478,15 +2479,21 @@ function handleScan(value, format) {
 
 // ─── 條碼查商品名稱 ───────────────────────────────────────────────────
 // 商品條碼本身只是一組數字，名稱不在條碼裡，要有外部商品資料庫才查得到。
-// 這裡用 Open Food Facts：免金鑰、開放資料，但以食品飲料為主，
-// 日用品／3C 查不到是常態，查不到就讓使用者自己打，不擋住流程。
+// 用 Open Food Facts 家族：免金鑰、開放資料、端點格式四個庫都一樣，
+// 差別只在網域。只查食品庫的話日用品、美妝、寵物食品都會查不到，
+// 所以四個一起問，誰先有答案就用誰（序列查最糟要等四倍逾時）。
 //
 // 刻意不做的事：
-//   1. 不串要 API key 的商業資料庫（Barcodelookup 等）——前端 App 的金鑰
-//      等於公開，任何人都能抽出來用光額度。
+//   1. 不串要 API key 的商業資料庫（Barcodelookup、Go-UPC 等）——前端 App
+//      的金鑰等於公開，任何人都能抽出來用光額度。
 //   2. 不爬電商網站——前端沒有後端可代發請求，瀏覽器直接抓會被 CORS 擋，
 //      而且對方改版就壞、查太頻繁會被封 IP。
-const OFF_API = 'https://world.openfoodfacts.org/api/v2/product/';
+const OFF_INSTANCES = [
+  { host: 'world.openfoodfacts.org',     label: '食品' },
+  { host: 'world.openproductsfacts.org', label: '一般商品' },
+  { host: 'world.openbeautyfacts.org',   label: '美妝' },
+  { host: 'world.openpetfoodfacts.org',  label: '寵物食品' }
+];
 const LOOKUP_TIMEOUT_MS = 6000;
 let lastLookupError = '';
 
@@ -2501,6 +2508,38 @@ function cacheProduct(barcode, info) {
   S.set('barcodeCache', cache);
 }
 
+// 公開資料庫永遠不可能收齊台灣的日用品，但「你自己會買的東西」是有限的一組。
+// 所以每次使用者手動打的名字都記下來，變成他自己的商品庫：
+// 下次掃同一個條碼直接帶出來，公開資料庫查不到的商品也會越用越齊。
+// 自己命名的優先於公開資料庫的名稱——使用者叫它「狗罐頭」就是狗罐頭。
+function learnProductName(barcode, name) {
+  if (!barcode || !name) return;
+  const prev = cachedProduct(barcode);
+  if (prev && prev.name === name) return;               // 沒改就不用重寫
+  cacheProduct(barcode, {
+    name,
+    brand: prev ? prev.brand : '',
+    qty: prev ? prev.qty : '',
+    own: true
+  });
+}
+
+// 查單一資料庫：查到就 resolve，沒這筆或失敗就 reject，
+// 這樣可以交給 Promise.any 取「第一個查到的」
+async function queryOffInstance(inst, barcode, signal) {
+  const url = `https://${inst.host}/api/v2/product/${encodeURIComponent(barcode)}`
+    + '.json?fields=product_name,product_name_zh,brands,quantity';
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const p = data && data.product;
+  if (!p) throw new Error('not found');              // 連得上、只是沒這筆
+  const name = (p.product_name_zh || p.product_name || '').trim();
+  const brand = (p.brands || '').split(',')[0].trim();
+  if (!name && !brand) throw new Error('empty');
+  return { name: name || brand, brand, qty: (p.quantity || '').trim(), db: inst.label };
+}
+
 async function lookupProduct(barcode) {
   const hit = cachedProduct(barcode);
   if (hit) return { ...hit, source: 'cache' };
@@ -2510,26 +2549,23 @@ async function lookupProduct(barcode) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LOOKUP_TIMEOUT_MS);
   try {
-    const url = OFF_API + encodeURIComponent(barcode)
-      + '.json?fields=product_name,product_name_zh,brands,quantity';
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) { lastLookupError = 'HTTP ' + res.status; return null; }
-    const data = await res.json();
-    const p = data && data.product;
-    if (!p) { lastLookupError = ''; return null; }          // 查得到伺服器、只是沒這筆
-    const name = (p.product_name_zh || p.product_name || '').trim();
-    const brand = (p.brands || '').split(',')[0].trim();
-    if (!name && !brand) { lastLookupError = ''; return null; }
-    const info = { name: name || brand, brand, qty: (p.quantity || '').trim() };
+    const info = await Promise.any(
+      OFF_INSTANCES.map(inst => queryOffInstance(inst, barcode, ctrl.signal))
+    );
     cacheProduct(barcode, info);
     lastLookupError = '';
     return { ...info, source: 'net' };
   } catch (e) {
-    // CORS 被擋、DNS 失敗、逾時都會走到這裡；訊息留給掃描診斷看
-    lastLookupError = (e && e.name === 'AbortError') ? '逾時' : ((e && e.message) || '連線失敗');
+    // 四個庫都沒結果時是 AggregateError；把各自的原因收斂成一句話。
+    // 全部都是 not found／empty = 真的沒這筆商品，不算錯誤，不必嚇使用者。
+    const reasons = (e && e.errors ? e.errors : [e])
+      .map(x => (x && x.name === 'AbortError') ? '逾時' : ((x && x.message) || '連線失敗'));
+    const allMissing = reasons.every(r => r === 'not found' || r === 'empty');
+    lastLookupError = allMissing ? '' : reasons.find(r => r !== 'not found' && r !== 'empty');
     return null;
   } finally {
     clearTimeout(timer);
+    ctrl.abort();                 // 已經有答案了，把還在跑的另外幾個收掉
   }
 }
 
@@ -2673,8 +2709,9 @@ function setLookupStatus(text, tone) {
 function applyLookupResult(info) {
   const input = document.getElementById('skName');
   if (input && !input.value.trim()) input.value = info.name;   // 不覆蓋使用者已經打的字
-  const extra = [info.brand && info.brand !== info.name ? info.brand : '', info.qty].filter(Boolean).join(' · ');
-  setLookupStatus((info.source === 'cache' ? '之前查過：' : '查到：') + info.name + (extra ? `（${extra}）` : ''), 'ok');
+  const extra = [info.brand && info.brand !== info.name ? info.brand : '', info.qty, info.db].filter(Boolean).join(' · ');
+  const prefix = info.own ? '你之前命名過：' : info.source === 'cache' ? '之前查過：' : '查到：';
+  setLookupStatus(prefix + info.name + (extra ? `（${extra}）` : ''), 'ok');
 }
 
 async function runProductLookup() {
@@ -2688,13 +2725,14 @@ async function runProductLookup() {
   if (info) { applyLookupResult(info); return; }
   setLookupStatus(lastLookupError
     ? `查不到（${lastLookupError}），直接手動輸入就好`
-    : '這個條碼不在資料庫裡（該庫以食品飲料為主），手動輸入就好', 'warn');
+    : '四個公開資料庫裡都沒有這個條碼，手動輸入就好', 'warn');
 }
 
 function saveScannedItem() {
   const code = window.__pendingScanCode || '';
   const name = document.getElementById('skName').value.trim();
   if (!name) { document.getElementById('skName').focus(); return; }
+  learnProductName(code, name);          // 記住這個條碼叫什麼，下次自己就認得
   const items = S.get('items', []);
   const lowAt = parseInt(document.getElementById('skLowAt').value, 10);
   items.unshift({
@@ -2856,7 +2894,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19d';
+const CONTENT_VERSION = '2026-09-19e';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -2970,6 +3008,7 @@ async function runScanDiag() {
   if (scanLastError) L.push('最近一次錯誤：' + scanLastError);
   L.push('');
   L.push('商品名稱查詢：' + (S.get('autoLookup', false) ? '自動查詢已開啟' : '自動查詢已關閉（可在面板手動查）'));
+  L.push('  查詢來源：' + OFF_INSTANCES.map(i => i.label).join('、'));
   L.push('  已快取商品：' + Object.keys(S.get('barcodeCache', {})).length + ' 筆');
   L.push('  網路狀態：' + (navigator.onLine ? '連線中' : '離線'));
   if (lastLookupError) L.push('  最近一次查詢失敗：' + lastLookupError);
