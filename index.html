@@ -2254,7 +2254,9 @@ async function openScanner(mode) {
     if ('BarcodeDetector' in window) {
       try {
         const supported = await BarcodeDetector.getSupportedFormats();
-        const want = ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
+        // W3C Shape Detection API 目前定義的完整條碼格式列表都要，讓原生層盡量吃下去，
+        // 這樣只有裝置真的不支援某格式時才會落到後面的備援解碼器
+        const want = ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','codabar','itf','data_matrix','aztec','pdf417'];
         const formats = want.filter(f => supported.includes(f));
         scanDetector = new BarcodeDetector(formats.length ? { formats } : undefined);
       } catch (e) { scanDetector = null; }   // 建構失敗就純靠備援
@@ -2379,7 +2381,10 @@ async function decodeWithQuagga(video) {
       src,
       inputStream: { size: Math.max(cw, ch) },
       locate: true,
-      decoder: { readers: ['ean_reader','upc_reader','upc_e_reader','ean_8_reader','code_128_reader','code_39_reader','i2of5_reader'] }
+      // 常見格式排前面（Quagga 依序嘗試，命中就停），其餘格式排後面照樣涵蓋到，
+      // 只是效能與誤判機率會差一點——使用者要求把能掃的格式都打開
+      decoder: { readers: ['ean_reader','upc_reader','upc_e_reader','ean_8_reader','code_128_reader','code_39_reader','i2of5_reader',
+        'codabar_reader','2of5_reader','code_93_reader','code_39_vin_reader','code_32_reader','pharmacode_reader'] }
     });
     return (result && result.codeResult && result.codeResult.code) ? result : null;
   } catch (e) {
@@ -2728,7 +2733,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19b';
+const CONTENT_VERSION = '2026-09-19c';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
