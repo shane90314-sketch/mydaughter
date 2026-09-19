@@ -1274,6 +1274,7 @@
 </nav>
 
 <script src="jsqr.js"></script>
+<script src="quagga.min.js"></script>
 <script>
 // ─── Service Worker ───────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
@@ -2168,7 +2169,7 @@ function showScanBusy(on) {
   else    el.classList.remove('on');
 }
 // 診斷用：分別記錄原生 API 與備援解碼器的成績
-let scanNativeTried = 0, scanNativeHits = 0, scanFallbackHits = 0;
+let scanNativeTried = 0, scanNativeHits = 0, scanFallbackHits = 0, scanQuaggaHits = 0;
 
 // 沒有指定的話，WebView 給的是低解析度且不會自動對焦的畫面，
 // 影像一糊就永遠讀不到條碼 —— 這是掃不到最常見的原因。
@@ -2239,7 +2240,8 @@ async function openScanner(mode) {
     ? '將商品條碼對準框內'
     : '將發票 QR 或商品條碼對準框內';
   scanNoHitSince = 0;
-  scanNativeTried = scanNativeHits = scanFallbackHits = 0;
+  scanNativeTried = scanNativeHits = scanFallbackHits = scanQuaggaHits = 0;
+  quaggaTickCount = 0; quaggaBusy = false;
 
   // 掃描畫面留到相機真的開起來才顯示。
   // 先開畫面再要權限的話，系統的授權視窗會蓋在掃描畫面上，
@@ -2348,6 +2350,45 @@ function decodeWithJsQR(video) {
   return r && r.data ? r.data : null;
 }
 
+// 第三層備援：商品條碼（EAN/UPC/Code128/Code39/ITF）。
+// jsQR 只解 QR，解不了這些 1D 格式；而原生 BarcodeDetector 對這些格式
+// 在 Android 上常需要 Google Play 服務下載條碼模組，沒網路或裝置缺模組
+// 時永遠回空陣列——兩層都失效的話，商品條碼就真的完全掃不到。
+// decodeSingle 比 jsQR 慢很多，所以只在前兩層都沒中、且每 3 個 tick
+// （約 0.8 秒）才嘗試一次，並用 quaggaBusy 擋掉還沒解完就疊上來的呼叫。
+let quaggaBusy = false, quaggaTickCount = 0;
+async function decodeWithQuagga(video) {
+  if (typeof Quagga === 'undefined' || quaggaBusy) return null;
+  quaggaTickCount++;
+  if (quaggaTickCount % 3 !== 0) return null;
+  const w = video.videoWidth, hgt = video.videoHeight;
+  if (!w || !hgt) return null;
+  const scale = Math.min(1, 640 / Math.max(w, hgt));
+  const cw = Math.round(w * scale), ch = Math.round(hgt * scale);
+  if (!scanCanvas) scanCanvas = document.createElement('canvas');
+  if (scanCanvas.width !== cw || scanCanvas.height !== ch) {
+    scanCanvas.width = cw; scanCanvas.height = ch;
+  }
+  const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, cw, ch);
+  let src;
+  try { src = scanCanvas.toDataURL('image/jpeg', 0.85); } catch (e) { return null; }
+  quaggaBusy = true;
+  try {
+    const result = await Quagga.decodeSingle({
+      src,
+      inputStream: { size: Math.max(cw, ch) },
+      locate: true,
+      decoder: { readers: ['ean_reader','upc_reader','upc_e_reader','ean_8_reader','code_128_reader','code_39_reader','i2of5_reader'] }
+    });
+    return (result && result.codeResult && result.codeResult.code) ? result : null;
+  } catch (e) {
+    return null;
+  } finally {
+    quaggaBusy = false;
+  }
+}
+
 async function scanTick() {
   const v = document.getElementById('scanVideo');
   if (!v || v.readyState < 2) return;
@@ -2364,6 +2405,11 @@ async function scanTick() {
   if (!codes || !codes.length) {
     const text = decodeWithJsQR(v);
     if (text) { codes = [{ rawValue: text, format: 'qr_code' }]; scanFallbackHits++; }
+  }
+
+  if (!codes || !codes.length) {
+    const q = await decodeWithQuagga(v);
+    if (q) { codes = [{ rawValue: q.codeResult.code, format: q.codeResult.format }]; scanQuaggaHits++; }
   }
 
   if (!codes || !codes.length) {
@@ -2682,7 +2728,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19a';
+const CONTENT_VERSION = '2026-09-19b';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -2777,14 +2823,18 @@ async function runScanDiag() {
       L.push('  取得格式失敗：' + e.message);
     }
   }
-  L.push('備援解碼器 jsQR：' + (typeof jsQR === 'function' ? '已載入' : '未載入'));
+  L.push('備援解碼器 jsQR（QR）：' + (typeof jsQR === 'function' ? '已載入' : '未載入'));
+  L.push('備援解碼器 Quagga（商品條碼）：' + (typeof Quagga !== 'undefined' ? '已載入' : '未載入'));
   L.push('相機 API：' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '可用' : '不可用'));
   L.push('安全來源：' + (window.isSecureContext ? '是' : '否（相機會被擋）'));
   L.push('');
-  if (scanNativeTried) {
-    L.push(`上次掃描：原生嘗試 ${scanNativeTried} 次、成功 ${scanNativeHits} 次；備援成功 ${scanFallbackHits} 次`);
+  if (scanNativeTried || scanQuaggaHits) {
+    L.push(`上次掃描：原生嘗試 ${scanNativeTried} 次、成功 ${scanNativeHits} 次；QR 備援成功 ${scanFallbackHits} 次；商品條碼備援成功 ${scanQuaggaHits} 次`);
     if (scanNativeTried > 10 && scanNativeHits === 0 && scanFallbackHits > 0) {
-      L.push('→ 原生辨識沒作用，實際靠備援解碼器在讀');
+      L.push('→ 原生辨識沒作用，QR 實際靠備援解碼器在讀');
+    }
+    if (scanNativeTried > 10 && scanNativeHits === 0 && scanQuaggaHits > 0) {
+      L.push('→ 原生辨識沒作用，商品條碼實際靠 Quagga 備援在讀（多半是裝置缺 Google 條碼模組或沒網路裝過）');
     }
   } else {
     L.push('上次掃描：尚無紀錄（開一次掃描器再回來看）');

@@ -5,6 +5,7 @@ const ASSETS = [
   './manifest.json',
   './icon.svg',
   './jsqr.js',
+  './quagga.min.js',
   './web-files.json'
 ];
 

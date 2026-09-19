@@ -5,6 +5,7 @@
     "manifest.json",
     "sw.js",
     "icon.svg",
-    "jsqr.js"
+    "jsqr.js",
+    "quagga.min.js"
   ]
 }
