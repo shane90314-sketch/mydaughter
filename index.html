@@ -245,19 +245,19 @@
     }
     .habit-dot.done { background: var(--success); }
     .habit-dot.today-dot { outline: 1.5px solid var(--primary); outline-offset: 1.5px; }
-    .habit-toggle {
+    .habit-toggle, .switch {
       width: 37px; height: 21px; border-radius: 11px; flex-shrink: 0;
       background: var(--surface-3); cursor: pointer; position: relative;
       border: 1px solid var(--border); transition: all .18s var(--ease);
     }
-    .habit-toggle::after {
+    .habit-toggle::after, .switch::after {
       content: ''; position: absolute; top: 2px; left: 2px;
       width: 15px; height: 15px; border-radius: 50%;
       background: var(--muted);
       transition: transform .18s var(--ease), background .18s var(--ease);
     }
-    .habit-toggle.on { background: var(--success-soft); border-color: var(--success); }
-    .habit-toggle.on::after { transform: translateX(16px); background: var(--success); }
+    .habit-toggle.on, .switch.on { background: var(--success-soft); border-color: var(--success); }
+    .habit-toggle.on::after, .switch.on::after { transform: translateX(16px); background: var(--success); }
 
     /* ── Notes ── */
     .note-input { width: 100%; height: 90px; resize: none; line-height: 1.6; }
@@ -330,6 +330,19 @@
     }
     .budget-item-amount.income  { color: var(--success); }
     .budget-item-amount.expense { color: var(--text); }
+    .cat-bar-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+    .cat-bar-icon {
+      width: 26px; height: 26px; flex-shrink: 0; border-radius: var(--radius-xs);
+      background: var(--surface-2); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cat-bar-icon .ic { width: 13px; height: 13px; color: var(--muted); }
+    .cat-bar-main { flex: 1; min-width: 0; }
+    .cat-bar-top { display: flex; justify-content: space-between; gap: 8px; font-size: .76rem; margin-bottom: 4px; }
+    .cat-bar-name { color: var(--muted); }
+    .cat-bar-amt { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--mono); flex-shrink: 0; }
+    .cat-bar-track { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+    .cat-bar-fill { height: 100%; border-radius: 2px; background: var(--danger); transition: width .4s var(--ease); }
 
     /* ── Progress ── */
     .progress-bar { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
@@ -933,10 +946,30 @@
       <div class="set-row" onclick="askNotify()">
         <div class="set-icon"><svg class="ic"><use href="#i-bell"/></svg></div>
         <div class="set-info">
-          <div class="set-name">開啟番茄鐘通知</div>
-          <div class="set-desc" id="notifyStatus">計時結束時通知你</div>
+          <div class="set-name">開啟通知</div>
+          <div class="set-desc" id="notifyStatus">番茄鐘結束、晚間習慣未打卡、物品即將到期時通知你</div>
         </div>
         <div class="set-arrow">›</div>
+      </div>
+      <div class="set-row" style="cursor:default">
+        <div class="set-icon"><svg class="ic"><use href="#i-clock"/></svg></div>
+        <div class="set-info">
+          <div class="set-name">提醒僅在 App 開啟時檢查</div>
+          <div class="set-desc">純網頁 / WebView 沒有背景推播能力，App 關閉時不會收到通知</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="section-label">掃描</p>
+    <div class="card">
+      <div class="set-row" onclick="toggleAutoLookup()">
+        <div class="set-icon"><svg class="ic"><use href="#i-search"/></svg></div>
+        <div class="set-info">
+          <div class="set-name">掃到條碼自動查商品名稱</div>
+          <div class="set-desc">會把條碼數字送到 Open Food Facts 家族的四個公開資料庫（食品／一般商品／美妝／寵物食品）查詢。關閉時，掃描面板上仍可自己按「查名稱」查一次。</div>
+        </div>
+        <button class="switch" id="autoLookupToggle"
+                onclick="event.stopPropagation();toggleAutoLookup()"></button>
       </div>
     </div>
 
@@ -962,7 +995,8 @@
     </div>
 
     <div style="text-align:center;padding:20px 0;color:var(--subtle);font-size:.72rem;letter-spacing:1px">
-      我的生活助手 · 資料只存在這台裝置
+      我的生活助手 · 你的紀錄只存在這台裝置<br>
+      （只有在查商品名稱時，會把該組條碼數字送出去查詢）
     </div>
   </div>
 
@@ -978,6 +1012,12 @@
           <option value="health">健康</option>
         </select>
         <button class="add-btn" onclick="addTodo()">＋</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+        <span style="font-size:.7rem;color:var(--subtle);flex-shrink:0">重複</span>
+        <button onclick="setTodoRepeat('none',this)" class="chip active-chip todo-repeat-chip" data-repeat="none">不重複</button>
+        <button onclick="setTodoRepeat('daily',this)" class="chip todo-repeat-chip" data-repeat="daily">每天</button>
+        <button onclick="setTodoRepeat('weekly',this)" class="chip todo-repeat-chip" data-repeat="weekly">每週</button>
       </div>
       <div style="display:flex;gap:8px">
         <button onclick="filterTodo('all')" id="filter-all" class="chip active-chip">全部</button>
@@ -1020,6 +1060,7 @@
         <button class="btn-full" onclick="addNote()">儲存筆記</button>
       </div>
     </div>
+    <input type="text" id="noteSearch" class="budget-input" style="width:100%;margin-bottom:10px" placeholder="搜尋筆記…" oninput="renderNotes()">
     <div id="notesList"></div>
   </div>
 
@@ -1044,6 +1085,13 @@
         <div class="budget-box-value" id="budgetBalance">$0</div>
       </div>
     </div>
+    <div class="card" id="budgetCatCard" style="display:none">
+      <div class="card-title">
+        <svg class="ic"><use href="#i-chart"/></svg>
+        支出分類
+      </div>
+      <div id="budgetCatStats"></div>
+    </div>
     <div class="card">
       <div class="card-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
@@ -1065,6 +1113,11 @@
       </div>
     </div>
     <p class="section-label" id="budgetListLabel">本月記錄</p>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="filterBudgetSource('all')" id="bsrc-all" class="chip active-chip">全部</button>
+      <button onclick="filterBudgetSource('scan')" id="bsrc-scan" class="chip">發票掃描</button>
+      <button onclick="filterBudgetSource('manual')" id="bsrc-manual" class="chip">手動輸入</button>
+    </div>
     <div class="card" id="budgetList">
       <div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-wallet"/></svg></div>尚無記帳記錄</div>
     </div>
@@ -1155,6 +1208,12 @@
     </div>
 
     <p class="section-label">我的物品</p>
+    <input type="text" id="itemSearch" class="budget-input" style="width:100%;margin-bottom:10px" placeholder="搜尋物品名稱或位置…" oninput="renderItems()">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="filterItemSource('all')" id="isrc-all" class="chip active-chip">全部</button>
+      <button onclick="filterItemSource('scan')" id="isrc-scan" class="chip">掃描新增</button>
+      <button onclick="filterItemSource('manual')" id="isrc-manual" class="chip">手動新增</button>
+    </div>
     <div class="card" id="itemList">
       <div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>
     </div>
@@ -1229,6 +1288,7 @@
 </nav>
 
 <script src="jsqr.js"></script>
+<script src="quagga.min.js"></script>
 <script>
 // ─── Service Worker ───────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
@@ -1240,6 +1300,29 @@ const S = {
   get: (k, def) => { try { const v=localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch(e){ return def; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 };
+
+// 修補資料形狀：手動改過的 localStorage、舊版留下的資料，或匯入時漏檢查到
+// 的邊界情況，都可能讓某個項目缺欄位，導致某個畫面的 render 函式直接壞掉。
+// 開機跑一次補齊，其他地方就不用每個讀取點都各自加防呆。
+function sanitizeStoredData() {
+  let changed = false;
+  const habits = S.get('habits', []);
+  habits.forEach(h => {
+    if (!h.records || typeof h.records !== 'object' || Array.isArray(h.records)) { h.records = {}; changed = true; }
+  });
+  const chals = S.get('challenges', []);
+  chals.forEach(c => {
+    if (!c.records || typeof c.records !== 'object' || Array.isArray(c.records)) { c.records = {}; changed = true; }
+    if (!Number.isFinite(c.days) || c.days < 1) { c.days = 21; changed = true; }
+    if (!c.start || typeof c.start !== 'string') { c.start = todayKey(); changed = true; }
+  });
+  const items = S.get('items', []);
+  items.forEach(it => {
+    if (!Number.isFinite(it.qty)) { it.qty = 0; changed = true; }
+  });
+  if (changed) { S.set('habits', habits); S.set('challenges', chals); S.set('items', items); }
+}
+sanitizeStoredData();
 
 // 已知圖示 id 就畫圖，否則原樣輸出（讓舊資料裡的 emoji 仍能顯示）
 const ICON_IDS = new Set(['run','book','lotus','pill','leaf','moon','pen','music','dumbbell','drop',
@@ -1268,6 +1351,13 @@ function last7Days() {
     days.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
   }
   return days;
+}
+// 週一為每週起始，回傳該週週一的日期字串，用來判斷兩個時間戳是否同一週
+function isoWeekKey(ts) {
+  const d = new Date(ts);
+  const dow = (d.getDay()+6)%7;   // 週一=0 … 週日=6
+  d.setDate(d.getDate()-dow);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 // ─── Clock / header ───────────────────────────────────────────────────
@@ -1305,6 +1395,16 @@ function openSettings() {
   showPage('settings');
   renderDataStats();
   updateNotifyStatus();
+  updateAutoLookupToggle();
+}
+
+function toggleAutoLookup() {
+  S.set('autoLookup', !S.get('autoLookup', false));
+  updateAutoLookupToggle();
+}
+function updateAutoLookupToggle() {
+  const el = document.getElementById('autoLookupToggle');
+  if (el) el.classList.toggle('on', !!S.get('autoLookup', false));
 }
 
 // ─── Mood ─────────────────────────────────────────────────────────────
@@ -1371,16 +1471,24 @@ loadWater();
 
 // ─── Todos ────────────────────────────────────────────────────────────
 let todoFilter = 'all';
+let todoRepeat = 'none';
 const tagLabels = {work:'工作',life:'生活',health:'健康'};
+const repeatLabels = {daily:'每天重複',weekly:'每週重複'};
+function setTodoRepeat(v, btn) {
+  todoRepeat = v;
+  document.querySelectorAll('.todo-repeat-chip').forEach(b=>b.classList.remove('active-chip'));
+  if(btn) btn.classList.add('active-chip');
+}
 function addTodo() {
   const input=document.getElementById('todoInput');
   const tag=document.getElementById('todoTag').value;
   const text=input.value.trim();
   if(!text) return;
   const todos=S.get('todos',[]);
-  todos.unshift({id:Date.now(),text,tag,done:false});
+  todos.unshift({id:Date.now(),text,tag,done:false,repeat:todoRepeat});
   S.set('todos',todos);
   input.value='';
+  setTodoRepeat('none', document.querySelector('.todo-repeat-chip[data-repeat="none"]'));
   renderTodos();
   refreshDashboard();
 }
@@ -1418,10 +1526,28 @@ function renderTodos() {
     <div class="todo-item">
       <div class="todo-check${t.done?' done':''}" onclick="toggleTodo(${t.id})"></div>
       <span class="todo-text${t.done?' done':''}">  ${escHtml(t.text)}</span>
-      <span class="todo-tag tag-${t.tag}">${tagLabels[t.tag]||t.tag}</span>
+      ${t.repeat && t.repeat!=='none' ? `<svg class="ic" style="width:11px;height:11px;color:var(--subtle)" title="${repeatLabels[t.repeat]||''}"><use href="#i-refresh"/></svg>` : ''}
+      <span class="todo-tag tag-${escHtml(t.tag)}">${escHtml(tagLabels[t.tag]||t.tag)}</span>
       <button class="del-btn" onclick="deleteTodo(${t.id})">✕</button>
     </div>`).join('');
 }
+
+// 重複待辦：完成後如果已經跨過一天／一週，自動恢復成待完成，
+// 這樣使用者不用每天手動把同一件事重新打一次。
+// 只在啟動時檢查一次即可——手機 App 幾乎都是「重新開啟」而非長駐後台跨夜。
+function resetRecurringTodos() {
+  const todos=S.get('todos',[]);
+  const td=todayKey(), wk=isoWeekKey(Date.now());
+  let changed=false;
+  todos.forEach(t=>{
+    if(!t.done || !t.repeat || t.repeat==='none' || !t.doneAt) return;
+    const doneDay=(d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`)(new Date(t.doneAt));
+    if(t.repeat==='daily' && doneDay!==td){ t.done=false; t.doneAt=null; changed=true; }
+    else if(t.repeat==='weekly' && isoWeekKey(t.doneAt)!==wk){ t.done=false; t.doneAt=null; changed=true; }
+  });
+  if(changed) S.set('todos',todos);
+}
+resetRecurringTodos();
 renderTodos();
 
 // ─── Habits ───────────────────────────────────────────────────────────
@@ -1507,7 +1633,10 @@ function renderNotes() {
   const notes=S.get('notes',[]);
   const list=document.getElementById('notesList');
   if(!notes.length){ list.innerHTML='<div class="card"><div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-pen"/></svg></div>尚無筆記</div></div>'; return; }
-  list.innerHTML=notes.map(n=>`
+  const q=(document.getElementById('noteSearch')?.value||'').trim().toLowerCase();
+  const filtered=q?notes.filter(n=>(n.text||'').toLowerCase().includes(q)):notes;
+  if(!filtered.length){ list.innerHTML='<div class="card"><div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>找不到符合的筆記</div></div>'; return; }
+  list.innerHTML=filtered.map(n=>`
     <div class="note-card">
       <button class="del-btn" onclick="deleteNote(${n.id})">✕</button>
       <div class="note-card-text">${escHtml(n.text)}</div>
@@ -1601,18 +1730,61 @@ function renderBudget() {
   document.getElementById('budgetIncome').textContent=money(income);
   document.getElementById('budgetExpense').textContent=money(expense);
   document.getElementById('budgetBalance').textContent=money(balance);
+  renderBudgetCatStats(records, expense);
   const list=document.getElementById('budgetList');
   if(!records.length){ list.innerHTML='<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-wallet"/></svg></div>這個月還沒有記錄</div>'; return; }
-  list.innerHTML=records.map(r=>`
+  let listRecords=records;
+  if(budgetSourceFilter==='scan')   listRecords=records.filter(r=>!!r.invoice);
+  if(budgetSourceFilter==='manual') listRecords=records.filter(r=>!r.invoice);
+  if(!listRecords.length){ list.innerHTML='<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>沒有符合條件的記錄</div>'; return; }
+  list.innerHTML=listRecords.map(r=>`
     <div class="budget-item">
       <div class="budget-cat-icon">${catIcon(r.cat)}</div>
       <div class="budget-item-info">
         <div class="budget-item-desc">${escHtml(r.desc||catLabel(r.cat))}</div>
-        <div class="budget-item-date">${escHtml(catLabel(r.cat))} · ${fmtDate(r.ts)}</div>
+        <div class="budget-item-date">${escHtml(catLabel(r.cat))} · ${fmtDate(r.ts)}${r.invoice?'　<svg class="ic" style="width:10px;height:10px;opacity:.6"><use href="#i-receipt"/></svg>':''}</div>
       </div>
       <div class="budget-item-amount ${r.type}">${r.type==='income'?'+':'-'}$${r.amount.toLocaleString()}</div>
       <button class="del-btn" onclick="deleteBudget(${r.id})">✕</button>
     </div>`).join('');
+}
+let budgetSourceFilter='all';
+function filterBudgetSource(f) {
+  budgetSourceFilter=f;
+  ['all','scan','manual'].forEach(v=>{
+    const el=document.getElementById('bsrc-'+v);
+    if(el) el.classList.toggle('active-chip', v===f);
+  });
+  renderBudget();
+}
+
+// 支出分類統計：只看支出（收入分類較少，混在一起意義不大），依金額排序
+function renderBudgetCatStats(records, expenseTotal) {
+  const card = document.getElementById('budgetCatCard');
+  const el = document.getElementById('budgetCatStats');
+  if (!card || !el) return;
+  const byCat = {};
+  records.forEach(r => {
+    if (r.type !== 'expense') return;
+    const label = catLabel(r.cat);
+    byCat[label] = (byCat[label] || 0) + r.amount;
+  });
+  const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  if (!rows.length || !expenseTotal) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  el.innerHTML = rows.map(([label, amt]) => {
+    const pct = Math.round(amt / expenseTotal * 100);
+    return `<div class="cat-bar-row">
+      <div class="cat-bar-icon">${catIcon(label)}</div>
+      <div class="cat-bar-main">
+        <div class="cat-bar-top">
+          <span class="cat-bar-name">${escHtml(label)}</span>
+          <span class="cat-bar-amt">$${amt.toLocaleString()}　${pct}%</span>
+        </div>
+        <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>`;
+  }).join('');
 }
 renderBudget();
 
@@ -1662,14 +1834,14 @@ function refreshDashboard() {
     <div class="todo-item">
       <div class="todo-check${t.done?' done':''}" onclick="toggleTodo(${t.id});refreshDashboard()"></div>
       <span class="todo-text">${escHtml(t.text)}</span>
-      <span class="todo-tag tag-${t.tag}">${tagLabels[t.tag]||t.tag}</span>
+      <span class="todo-tag tag-${escHtml(t.tag)}">${escHtml(tagLabels[t.tag]||t.tag)}</span>
     </div>`).join('');
 }
 refreshDashboard();
 
 // ─── Escape ───────────────────────────────────────────────────────────
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ─── Daily Quotes ─────────────────────────────────────────────────────
@@ -1843,7 +2015,18 @@ function renderWeekChart() {
 }
 
 // ─── 設定：備份 / 還原 / 通知 / 清除 ──────────────────────────────────
-const DATA_KEYS=['todos','habits','notes','budget','water','moods','challenges','reflects','pomodoros','items'];
+const DATA_KEYS=['todos','habits','notes','budget','water','moods','challenges','reflects','pomodoros','items','barcodeCache'];
+// 每個欄位預期的形狀，匯入時用來擋掉手動改壞或格式不對的備份檔，
+// 避免壞資料進到 localStorage 後在別的畫面把 render 函式炸掉
+const DATA_SHAPES={todos:'array',habits:'array',notes:'array',budget:'array',
+  water:'object',moods:'object',challenges:'array',reflects:'array',
+  pomodoros:'object',items:'array',barcodeCache:'object'};
+function shapeOk(key, val) {
+  const shape=DATA_SHAPES[key];
+  if(shape==='array') return Array.isArray(val);
+  if(shape==='object') return val && typeof val==='object' && !Array.isArray(val);
+  return true;
+}
 
 function exportData() {
   const dump={ _app:'我的生活助手', _version:1, _exportedAt:new Date().toISOString() };
@@ -1865,11 +2048,16 @@ function importData(input) {
     let data;
     try { data=JSON.parse(reader.result); }
     catch(e){ alert('檔案格式不正確，請選擇匯出的備份檔'); input.value=''; return; }
-    if(!data || data._app!=='我的生活助手') {
+    if(!data || typeof data!=='object') { alert('檔案內容不是有效的備份資料'); input.value=''; return; }
+    if(data._app!=='我的生活助手') {
       if(!confirm('這個檔案不像是本 App 的備份檔，仍要匯入嗎？')) { input.value=''; return; }
     }
+    const badKeys=DATA_KEYS.filter(k=>data[k]!=null && !shapeOk(k,data[k]));
+    if(badKeys.length) {
+      if(!confirm(`備份檔裡有 ${badKeys.length} 個欄位（${badKeys.join('、')}）格式不正確，會略過不匯入，其餘欄位仍會正常匯入。要繼續嗎？`)) { input.value=''; return; }
+    }
     if(!confirm('匯入會覆蓋目前所有資料，確定嗎？')) { input.value=''; return; }
-    DATA_KEYS.forEach(k=>{ if(data[k]!=null) S.set(k,data[k]); });
+    DATA_KEYS.forEach(k=>{ if(data[k]!=null && shapeOk(k,data[k])) S.set(k,data[k]); });
     input.value='';
     alert('匯入完成');
     location.reload();
@@ -1884,7 +2072,7 @@ function askNotify() {
     alert('通知已被封鎖，請到瀏覽器設定中重新允許本網站的通知');
     return;
   }
-  Notification.requestPermission().then(()=>updateNotifyStatus());
+  Notification.requestPermission().then(()=>{ updateNotifyStatus(); if(typeof checkReminders==='function') checkReminders(); });
 }
 
 function updateNotifyStatus() {
@@ -1894,7 +2082,7 @@ function updateNotifyStatus() {
   el.textContent =
     Notification.permission==='granted' ? '已開啟' :
     Notification.permission==='denied'  ? '已封鎖，請到瀏覽器設定開啟' :
-    '點擊開啟，計時結束時通知你';
+    '點擊開啟，番茄鐘結束、晚間習慣未打卡、物品即將到期時通知你';
 }
 
 function renderDataStats() {
@@ -1908,6 +2096,7 @@ function renderDataStats() {
     ['wallet','記帳',S.get('budget',[]).length+' 筆'],
     ['moon','反思',S.get('reflects',[]).length+' 天'],
     ['box','物品',S.get('items',[]).length+' 項'],
+    ['search','商品庫',Object.keys(S.get('barcodeCache',{})).length+' 個條碼'],
     ['timer','今日番茄鐘',pomoTodayCount()+' 個'],
   ];
   el.innerHTML=rows.map(([icon,name,val])=>`
@@ -2005,7 +2194,7 @@ function showScanBusy(on) {
   else    el.classList.remove('on');
 }
 // 診斷用：分別記錄原生 API 與備援解碼器的成績
-let scanNativeTried = 0, scanNativeHits = 0, scanFallbackHits = 0;
+let scanNativeTried = 0, scanNativeHits = 0, scanFallbackHits = 0, scanQuaggaHits = 0;
 
 // 沒有指定的話，WebView 給的是低解析度且不會自動對焦的畫面，
 // 影像一糊就永遠讀不到條碼 —— 這是掃不到最常見的原因。
@@ -2076,7 +2265,8 @@ async function openScanner(mode) {
     ? '將商品條碼對準框內'
     : '將發票 QR 或商品條碼對準框內';
   scanNoHitSince = 0;
-  scanNativeTried = scanNativeHits = scanFallbackHits = 0;
+  scanNativeTried = scanNativeHits = scanFallbackHits = scanQuaggaHits = 0;
+  quaggaTickCount = 0; quaggaBusy = false;
 
   // 掃描畫面留到相機真的開起來才顯示。
   // 先開畫面再要權限的話，系統的授權視窗會蓋在掃描畫面上，
@@ -2089,7 +2279,9 @@ async function openScanner(mode) {
     if ('BarcodeDetector' in window) {
       try {
         const supported = await BarcodeDetector.getSupportedFormats();
-        const want = ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
+        // W3C Shape Detection API 目前定義的完整條碼格式列表都要，讓原生層盡量吃下去，
+        // 這樣只有裝置真的不支援某格式時才會落到後面的備援解碼器
+        const want = ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','codabar','itf','data_matrix','aztec','pdf417'];
         const formats = want.filter(f => supported.includes(f));
         scanDetector = new BarcodeDetector(formats.length ? { formats } : undefined);
       } catch (e) { scanDetector = null; }   // 建構失敗就純靠備援
@@ -2185,6 +2377,48 @@ function decodeWithJsQR(video) {
   return r && r.data ? r.data : null;
 }
 
+// 第三層備援：商品條碼（EAN/UPC/Code128/Code39/ITF）。
+// jsQR 只解 QR，解不了這些 1D 格式；而原生 BarcodeDetector 對這些格式
+// 在 Android 上常需要 Google Play 服務下載條碼模組，沒網路或裝置缺模組
+// 時永遠回空陣列——兩層都失效的話，商品條碼就真的完全掃不到。
+// decodeSingle 比 jsQR 慢很多，所以只在前兩層都沒中、且每 3 個 tick
+// （約 0.8 秒）才嘗試一次，並用 quaggaBusy 擋掉還沒解完就疊上來的呼叫。
+let quaggaBusy = false, quaggaTickCount = 0;
+async function decodeWithQuagga(video) {
+  if (typeof Quagga === 'undefined' || quaggaBusy) return null;
+  quaggaTickCount++;
+  if (quaggaTickCount % 3 !== 0) return null;
+  const w = video.videoWidth, hgt = video.videoHeight;
+  if (!w || !hgt) return null;
+  const scale = Math.min(1, 640 / Math.max(w, hgt));
+  const cw = Math.round(w * scale), ch = Math.round(hgt * scale);
+  if (!scanCanvas) scanCanvas = document.createElement('canvas');
+  if (scanCanvas.width !== cw || scanCanvas.height !== ch) {
+    scanCanvas.width = cw; scanCanvas.height = ch;
+  }
+  const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, cw, ch);
+  let src;
+  try { src = scanCanvas.toDataURL('image/jpeg', 0.85); } catch (e) { return null; }
+  quaggaBusy = true;
+  try {
+    const result = await Quagga.decodeSingle({
+      src,
+      inputStream: { size: Math.max(cw, ch) },
+      locate: true,
+      // 常見格式排前面（Quagga 依序嘗試，命中就停），其餘格式排後面照樣涵蓋到，
+      // 只是效能與誤判機率會差一點——使用者要求把能掃的格式都打開
+      decoder: { readers: ['ean_reader','upc_reader','upc_e_reader','ean_8_reader','code_128_reader','code_39_reader','i2of5_reader',
+        'codabar_reader','2of5_reader','code_93_reader','code_39_vin_reader','code_32_reader','pharmacode_reader'] }
+    });
+    return (result && result.codeResult && result.codeResult.code) ? result : null;
+  } catch (e) {
+    return null;
+  } finally {
+    quaggaBusy = false;
+  }
+}
+
 async function scanTick() {
   const v = document.getElementById('scanVideo');
   if (!v || v.readyState < 2) return;
@@ -2201,6 +2435,11 @@ async function scanTick() {
   if (!codes || !codes.length) {
     const text = decodeWithJsQR(v);
     if (text) { codes = [{ rawValue: text, format: 'qr_code' }]; scanFallbackHits++; }
+  }
+
+  if (!codes || !codes.length) {
+    const q = await decodeWithQuagga(v);
+    if (q) { codes = [{ rawValue: q.codeResult.code, format: q.codeResult.format }]; scanQuaggaHits++; }
   }
 
   if (!codes || !codes.length) {
@@ -2236,6 +2475,98 @@ function handleScan(value, format) {
   if (inv && scanMode !== 'barcode') { sheetInvoice(inv); return; }
   if (format === 'qr_code' && scanMode !== 'barcode') { sheetUnknown(value); return; }
   sheetItem(value, format);
+}
+
+// ─── 條碼查商品名稱 ───────────────────────────────────────────────────
+// 商品條碼本身只是一組數字，名稱不在條碼裡，要有外部商品資料庫才查得到。
+// 用 Open Food Facts 家族：免金鑰、開放資料、端點格式四個庫都一樣，
+// 差別只在網域。只查食品庫的話日用品、美妝、寵物食品都會查不到，
+// 所以四個一起問，誰先有答案就用誰（序列查最糟要等四倍逾時）。
+//
+// 刻意不做的事：
+//   1. 不串要 API key 的商業資料庫（Barcodelookup、Go-UPC 等）——前端 App
+//      的金鑰等於公開，任何人都能抽出來用光額度。
+//   2. 不爬電商網站——前端沒有後端可代發請求，瀏覽器直接抓會被 CORS 擋，
+//      而且對方改版就壞、查太頻繁會被封 IP。
+const OFF_INSTANCES = [
+  { host: 'world.openfoodfacts.org',     label: '食品' },
+  { host: 'world.openproductsfacts.org', label: '一般商品' },
+  { host: 'world.openbeautyfacts.org',   label: '美妝' },
+  { host: 'world.openpetfoodfacts.org',  label: '寵物食品' }
+];
+const LOOKUP_TIMEOUT_MS = 6000;
+let lastLookupError = '';
+
+// 查過的結果存起來：同一個商品下次掃就不必再連網，離線也查得到
+function cachedProduct(barcode) {
+  const cache = S.get('barcodeCache', {});
+  return cache[barcode] || null;
+}
+function cacheProduct(barcode, info) {
+  const cache = S.get('barcodeCache', {});
+  cache[barcode] = info;
+  S.set('barcodeCache', cache);
+}
+
+// 公開資料庫永遠不可能收齊台灣的日用品，但「你自己會買的東西」是有限的一組。
+// 所以每次使用者手動打的名字都記下來，變成他自己的商品庫：
+// 下次掃同一個條碼直接帶出來，公開資料庫查不到的商品也會越用越齊。
+// 自己命名的優先於公開資料庫的名稱——使用者叫它「狗罐頭」就是狗罐頭。
+function learnProductName(barcode, name) {
+  if (!barcode || !name) return;
+  const prev = cachedProduct(barcode);
+  if (prev && prev.name === name) return;               // 沒改就不用重寫
+  cacheProduct(barcode, {
+    name,
+    brand: prev ? prev.brand : '',
+    qty: prev ? prev.qty : '',
+    own: true
+  });
+}
+
+// 查單一資料庫：查到就 resolve，沒這筆或失敗就 reject，
+// 這樣可以交給 Promise.any 取「第一個查到的」
+async function queryOffInstance(inst, barcode, signal) {
+  const url = `https://${inst.host}/api/v2/product/${encodeURIComponent(barcode)}`
+    + '.json?fields=product_name,product_name_zh,brands,quantity';
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const p = data && data.product;
+  if (!p) throw new Error('not found');              // 連得上、只是沒這筆
+  const name = (p.product_name_zh || p.product_name || '').trim();
+  const brand = (p.brands || '').split(',')[0].trim();
+  if (!name && !brand) throw new Error('empty');
+  return { name: name || brand, brand, qty: (p.quantity || '').trim(), db: inst.label };
+}
+
+async function lookupProduct(barcode) {
+  const hit = cachedProduct(barcode);
+  if (hit) return { ...hit, source: 'cache' };
+  if (!navigator.onLine) { lastLookupError = '離線中'; return null; }
+
+  // 沒有 AbortSignal.timeout 的舊 WebView 也要能跑，所以自己接 controller
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LOOKUP_TIMEOUT_MS);
+  try {
+    const info = await Promise.any(
+      OFF_INSTANCES.map(inst => queryOffInstance(inst, barcode, ctrl.signal))
+    );
+    cacheProduct(barcode, info);
+    lastLookupError = '';
+    return { ...info, source: 'net' };
+  } catch (e) {
+    // 四個庫都沒結果時是 AggregateError；把各自的原因收斂成一句話。
+    // 全部都是 not found／empty = 真的沒這筆商品，不算錯誤，不必嚇使用者。
+    const reasons = (e && e.errors ? e.errors : [e])
+      .map(x => (x && x.name === 'AbortError') ? '逾時' : ((x && x.message) || '連線失敗'));
+    const allMissing = reasons.every(r => r === 'not found' || r === 'empty');
+    lastLookupError = allMissing ? '' : reasons.find(r => r !== 'not found' && r !== 'empty');
+    return null;
+  } finally {
+    clearTimeout(timer);
+    ctrl.abort();                 // 已經有答案了，把還在跑的另外幾個收掉
+  }
 }
 
 // ─── 底部面板 ─────────────────────────────────────────────────────────
@@ -2309,6 +2640,7 @@ function saveInvoice() {
 
 // ─── 條碼 → 物品 ──────────────────────────────────────────────────────
 function sheetItem(code, format) {
+  window.__pendingScanCode = code;   // 避免把掃到的原始內容直接內插進 onclick 字串（可能被當成 JS 執行）
   const known = S.get('items', []).find(x => x.barcode === code);
   openSheet(`
     <div class="sheet-title"><svg class="ic"><use href="#i-box"/></svg>${known ? '這個物品已在清單中' : '新增物品'}</div>
@@ -2323,7 +2655,12 @@ function sheetItem(code, format) {
     ` : `
       <div class="sheet-field" style="margin-top:14px">
         <div class="sheet-label">物品名稱</div>
-        <input class="budget-input" id="skName" style="width:100%" placeholder="例如：牛奶" autofocus>
+        <div class="sheet-row" style="gap:8px">
+          <input class="budget-input" id="skName" style="flex:1" placeholder="例如：牛奶" autofocus>
+          <button class="btn-ghost" id="skLookupBtn" style="flex:0 0 auto;white-space:nowrap"
+                  onclick="runProductLookup()">查名稱</button>
+        </div>
+        <div class="sheet-sub" id="skLookupStatus" style="margin-top:6px"></div>
       </div>
       <div class="sheet-row">
         <div class="sheet-field" style="flex:0 0 88px">
@@ -2335,27 +2672,75 @@ function sheetItem(code, format) {
           <input class="budget-input" id="skPlace" style="width:100%" placeholder="冰箱 / 儲藏室">
         </div>
       </div>
-      <div class="sheet-field">
-        <div class="sheet-label">到期日（選填）</div>
-        <input class="budget-input" id="skExp" type="date" style="width:100%">
+      <div class="sheet-row">
+        <div class="sheet-field" style="flex:1">
+          <div class="sheet-label">到期日（選填）</div>
+          <input class="budget-input" id="skExp" type="date" style="width:100%">
+        </div>
+        <div class="sheet-field" style="flex:0 0 100px">
+          <div class="sheet-label">低庫存提醒</div>
+          <input class="budget-input" id="skLowAt" type="number" min="0" placeholder="數量" style="width:100%">
+        </div>
       </div>
       <div class="sheet-btns">
         <button class="btn-ghost" onclick="closeSheet()">取消</button>
-        <button class="btn-full" style="flex:1.4" onclick="saveScannedItem('${escHtml(code)}')">加入清單</button>
+        <button class="btn-full" style="flex:1.4" onclick="saveScannedItem()">加入清單</button>
       </div>
     `}
   `);
+
+  // 之前查過就直接帶出來（不必連網）；沒查過才看設定要不要自動連網查
+  if (!known) {
+    const hit = cachedProduct(code);
+    if (hit) applyLookupResult({ ...hit, source: 'cache' });
+    else if (S.get('autoLookup', false)) runProductLookup();
+  }
 }
 
-function saveScannedItem(code) {
+function setLookupStatus(text, tone) {
+  const el = document.getElementById('skLookupStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = tone === 'ok'   ? 'var(--success)'
+                 : tone === 'warn' ? 'var(--warning)'
+                 : 'var(--subtle)';
+}
+
+function applyLookupResult(info) {
+  const input = document.getElementById('skName');
+  if (input && !input.value.trim()) input.value = info.name;   // 不覆蓋使用者已經打的字
+  const extra = [info.brand && info.brand !== info.name ? info.brand : '', info.qty, info.db].filter(Boolean).join(' · ');
+  const prefix = info.own ? '你之前命名過：' : info.source === 'cache' ? '之前查過：' : '查到：';
+  setLookupStatus(prefix + info.name + (extra ? `（${extra}）` : ''), 'ok');
+}
+
+async function runProductLookup() {
+  const code = window.__pendingScanCode || '';
+  if (!code) return;
+  const btn = document.getElementById('skLookupBtn');
+  if (btn) btn.disabled = true;
+  setLookupStatus('查詢中…');
+  const info = await lookupProduct(code);
+  if (btn) btn.disabled = false;
+  if (info) { applyLookupResult(info); return; }
+  setLookupStatus(lastLookupError
+    ? `查不到（${lastLookupError}），直接手動輸入就好`
+    : '四個公開資料庫裡都沒有這個條碼，手動輸入就好', 'warn');
+}
+
+function saveScannedItem() {
+  const code = window.__pendingScanCode || '';
   const name = document.getElementById('skName').value.trim();
   if (!name) { document.getElementById('skName').focus(); return; }
+  learnProductName(code, name);          // 記住這個條碼叫什麼，下次自己就認得
   const items = S.get('items', []);
+  const lowAt = parseInt(document.getElementById('skLowAt').value, 10);
   items.unshift({
     id: Date.now(), name, barcode: code,
     qty: Math.max(1, parseInt(document.getElementById('skQty').value, 10) || 1),
     place: document.getElementById('skPlace').value.trim(),
     expiry: document.getElementById('skExp').value || '',
+    lowAt: Number.isFinite(lowAt) && lowAt > 0 ? lowAt : 0,
     ts: Date.now()
   });
   S.set('items', items);
@@ -2429,6 +2814,16 @@ function daysUntil(dateStr) {
   return Math.round((t - today.getTime()) / 86400000);
 }
 
+let itemSourceFilter = 'all';
+function filterItemSource(f) {
+  itemSourceFilter = f;
+  ['all','scan','manual'].forEach(v=>{
+    const el=document.getElementById('isrc-'+v);
+    if(el) el.classList.toggle('active-chip', v===f);
+  });
+  renderItems();
+}
+
 function renderItems() {
   const items = S.get('items', []);
   const list = document.getElementById('itemList');
@@ -2437,7 +2832,18 @@ function renderItems() {
     list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>';
     return;
   }
-  list.innerHTML = items.map(it => {
+  let filtered = items;
+  if (itemSourceFilter === 'scan')   filtered = filtered.filter(it => !!it.barcode);
+  if (itemSourceFilter === 'manual') filtered = filtered.filter(it => !it.barcode);
+  const q = (document.getElementById('itemSearch')?.value || '').trim().toLowerCase();
+  if (q) filtered = filtered.filter(it =>
+    (it.name || '').toLowerCase().includes(q) || (it.place || '').toLowerCase().includes(q)
+  );
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>找不到符合的物品</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(it => {
     const dLeft = daysUntil(it.expiry);
     let expTxt = '';
     if (dLeft !== null) {
@@ -2446,7 +2852,8 @@ function renderItems() {
       else if (dLeft <= 7) expTxt = `<span class="soon">${dLeft} 天後到期</span>`;
       else                 expTxt = `${it.expiry} 到期`;
     }
-    const meta = [escHtml(it.place), expTxt, it.barcode ? '<svg class="ic" style="width:11px;height:11px;opacity:.55"><use href="#i-camera"/></svg>' : ''].filter(Boolean).join(' · ');
+    const lowTxt = (it.lowAt && it.qty <= it.lowAt) ? '<span class="warn">庫存偏低</span>' : '';
+    const meta = [escHtml(it.place), lowTxt, expTxt, it.barcode ? '<svg class="ic" style="width:11px;height:11px;opacity:.55"><use href="#i-camera"/></svg>' : ''].filter(Boolean).join(' · ');
     return `<div class="item-row">
       <div class="item-qty">${it.qty}</div>
       <div class="item-info">
@@ -2487,7 +2894,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-18a';
+const CONTENT_VERSION = '2026-09-19e';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -2516,6 +2923,57 @@ window.__busy = function () {
   } catch (e) { return false; }
 };
 
+// ─── 提醒通知（習慣未打卡 / 物品即將到期）──────────────────────────────
+// 純前端 App、資料只存在裝置上，沒有伺服器可以做背景推播，所以只能在
+// App 開啟、或留在前景時定期檢查一次，沒辦法像原生鬧鐘一樣關掉 App 也會響。
+// 用 reminderLog 記錄「今天這個類別已經提醒過」，同一天不會重複打擾。
+function notify(title, body) {
+  try { if (navigator.vibrate) navigator.vibrate(120); } catch (e) {}
+  try {
+    if (window.Notification && Notification.permission === 'granted') {
+      new Notification(title, { body, icon: 'icon.svg' });
+    }
+  } catch (e) {}
+}
+function reminderFiredToday(key) {
+  return (S.get('reminderLog', {}))[todayKey() + '_' + key] === true;
+}
+function markReminderFired(key) {
+  const log = S.get('reminderLog', {});
+  const td = todayKey();
+  Object.keys(log).forEach(k => { if (!k.startsWith(td + '_')) delete log[k]; });
+  log[td + '_' + key] = true;
+  S.set('reminderLog', log);
+}
+function checkReminders() {
+  if (!window.Notification || Notification.permission !== 'granted') return;
+  const now = new Date();
+
+  // 太早提醒沒意義，晚上 8 點後才提醒還沒打卡的習慣
+  if (now.getHours() >= 20 && !reminderFiredToday('habit')) {
+    const habits = S.get('habits', []);
+    const td = todayKey();
+    const undone = habits.filter(h => !h.records[td]);
+    if (undone.length) {
+      notify('習慣還沒打卡', `${undone.map(h => h.name).slice(0, 3).join('、')} 等 ${undone.length} 個習慣今天還沒打卡`);
+      markReminderFired('habit');
+    }
+  }
+
+  // 物品到期：一天檢查一次就夠
+  if (!reminderFiredToday('items')) {
+    const items = S.get('items', []);
+    const urgent = items.filter(it => { const d = daysUntil(it.expiry); return d !== null && d <= 3; });
+    if (urgent.length) {
+      notify('有物品即將到期', `${urgent.map(it => it.name).slice(0, 3).join('、')} 等 ${urgent.length} 項即將到期或已過期`);
+      markReminderFired('items');
+    }
+  }
+}
+checkReminders();
+setInterval(checkReminders, 15 * 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminders(); });
+
 // ─── 掃描診斷 ─────────────────────────────────────────────────────────
 // 相機正常卻掃不到時，用來判斷是哪一層失效
 async function runScanDiag() {
@@ -2531,19 +2989,29 @@ async function runScanDiag() {
       L.push('  取得格式失敗：' + e.message);
     }
   }
-  L.push('備援解碼器 jsQR：' + (typeof jsQR === 'function' ? '已載入' : '未載入'));
+  L.push('備援解碼器 jsQR（QR）：' + (typeof jsQR === 'function' ? '已載入' : '未載入'));
+  L.push('備援解碼器 Quagga（商品條碼）：' + (typeof Quagga !== 'undefined' ? '已載入' : '未載入'));
   L.push('相機 API：' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '可用' : '不可用'));
   L.push('安全來源：' + (window.isSecureContext ? '是' : '否（相機會被擋）'));
   L.push('');
-  if (scanNativeTried) {
-    L.push(`上次掃描：原生嘗試 ${scanNativeTried} 次、成功 ${scanNativeHits} 次；備援成功 ${scanFallbackHits} 次`);
+  if (scanNativeTried || scanQuaggaHits) {
+    L.push(`上次掃描：原生嘗試 ${scanNativeTried} 次、成功 ${scanNativeHits} 次；QR 備援成功 ${scanFallbackHits} 次；商品條碼備援成功 ${scanQuaggaHits} 次`);
     if (scanNativeTried > 10 && scanNativeHits === 0 && scanFallbackHits > 0) {
-      L.push('→ 原生辨識沒作用，實際靠備援解碼器在讀');
+      L.push('→ 原生辨識沒作用，QR 實際靠備援解碼器在讀');
+    }
+    if (scanNativeTried > 10 && scanNativeHits === 0 && scanQuaggaHits > 0) {
+      L.push('→ 原生辨識沒作用，商品條碼實際靠 Quagga 備援在讀（多半是裝置缺 Google 條碼模組或沒網路裝過）');
     }
   } else {
     L.push('上次掃描：尚無紀錄（開一次掃描器再回來看）');
   }
   if (scanLastError) L.push('最近一次錯誤：' + scanLastError);
+  L.push('');
+  L.push('商品名稱查詢：' + (S.get('autoLookup', false) ? '自動查詢已開啟' : '自動查詢已關閉（可在面板手動查）'));
+  L.push('  查詢來源：' + OFF_INSTANCES.map(i => i.label).join('、'));
+  L.push('  已快取商品：' + Object.keys(S.get('barcodeCache', {})).length + ' 筆');
+  L.push('  網路狀態：' + (navigator.onLine ? '連線中' : '離線'));
+  if (lastLookupError) L.push('  最近一次查詢失敗：' + lastLookupError);
   el.textContent = L.join('\n');
 }
 

@@ -27,7 +27,7 @@ final class WebUpdater {
     /** 內容來源：GitHub Pages 上 main 分支的部署結果 */
     private static final String BASE = "https://shaneqwq.github.io/mydaughter/";
     /** 清單抓不到時的退路；正常情況以伺服器上的 web-files.json 為準 */
-    private static final String[] FALLBACK_FILES = { "index.html", "manifest.json", "sw.js", "icon.svg" };
+    private static final String[] FALLBACK_FILES = { "index.html", "manifest.json", "sw.js", "icon.svg", "jsqr.js", "quagga.min.js" };
     private static final String FILE_LIST = "web-files.json";
 
     private static final String PREFS = "web_update";
