@@ -245,19 +245,19 @@
     }
     .habit-dot.done { background: var(--success); }
     .habit-dot.today-dot { outline: 1.5px solid var(--primary); outline-offset: 1.5px; }
-    .habit-toggle {
+    .habit-toggle, .switch {
       width: 37px; height: 21px; border-radius: 11px; flex-shrink: 0;
       background: var(--surface-3); cursor: pointer; position: relative;
       border: 1px solid var(--border); transition: all .18s var(--ease);
     }
-    .habit-toggle::after {
+    .habit-toggle::after, .switch::after {
       content: ''; position: absolute; top: 2px; left: 2px;
       width: 15px; height: 15px; border-radius: 50%;
       background: var(--muted);
       transition: transform .18s var(--ease), background .18s var(--ease);
     }
-    .habit-toggle.on { background: var(--success-soft); border-color: var(--success); }
-    .habit-toggle.on::after { transform: translateX(16px); background: var(--success); }
+    .habit-toggle.on, .switch.on { background: var(--success-soft); border-color: var(--success); }
+    .habit-toggle.on::after, .switch.on::after { transform: translateX(16px); background: var(--success); }
 
     /* ── Notes ── */
     .note-input { width: 100%; height: 90px; resize: none; line-height: 1.6; }
@@ -960,6 +960,19 @@
       </div>
     </div>
 
+    <p class="section-label">掃描</p>
+    <div class="card">
+      <div class="set-row" onclick="toggleAutoLookup()">
+        <div class="set-icon"><svg class="ic"><use href="#i-search"/></svg></div>
+        <div class="set-info">
+          <div class="set-name">掃到條碼自動查商品名稱</div>
+          <div class="set-desc">會把條碼數字送到 Open Food Facts 公開資料庫。關閉時，掃描面板上仍可自己按「查名稱」查一次。</div>
+        </div>
+        <button class="switch" id="autoLookupToggle"
+                onclick="event.stopPropagation();toggleAutoLookup()"></button>
+      </div>
+    </div>
+
     <p class="section-label">掃描診斷</p>
     <div class="card">
       <div id="scanDiag" class="code-box" style="max-height:none">尚未檢查</div>
@@ -982,7 +995,8 @@
     </div>
 
     <div style="text-align:center;padding:20px 0;color:var(--subtle);font-size:.72rem;letter-spacing:1px">
-      我的生活助手 · 資料只存在這台裝置
+      我的生活助手 · 你的紀錄只存在這台裝置<br>
+      （只有在查商品名稱時，會把該組條碼數字送出去查詢）
     </div>
   </div>
 
@@ -1381,6 +1395,16 @@ function openSettings() {
   showPage('settings');
   renderDataStats();
   updateNotifyStatus();
+  updateAutoLookupToggle();
+}
+
+function toggleAutoLookup() {
+  S.set('autoLookup', !S.get('autoLookup', false));
+  updateAutoLookupToggle();
+}
+function updateAutoLookupToggle() {
+  const el = document.getElementById('autoLookupToggle');
+  if (el) el.classList.toggle('on', !!S.get('autoLookup', false));
 }
 
 // ─── Mood ─────────────────────────────────────────────────────────────
@@ -1991,12 +2015,12 @@ function renderWeekChart() {
 }
 
 // ─── 設定：備份 / 還原 / 通知 / 清除 ──────────────────────────────────
-const DATA_KEYS=['todos','habits','notes','budget','water','moods','challenges','reflects','pomodoros','items'];
+const DATA_KEYS=['todos','habits','notes','budget','water','moods','challenges','reflects','pomodoros','items','barcodeCache'];
 // 每個欄位預期的形狀，匯入時用來擋掉手動改壞或格式不對的備份檔，
 // 避免壞資料進到 localStorage 後在別的畫面把 render 函式炸掉
 const DATA_SHAPES={todos:'array',habits:'array',notes:'array',budget:'array',
   water:'object',moods:'object',challenges:'array',reflects:'array',
-  pomodoros:'object',items:'array'};
+  pomodoros:'object',items:'array',barcodeCache:'object'};
 function shapeOk(key, val) {
   const shape=DATA_SHAPES[key];
   if(shape==='array') return Array.isArray(val);
@@ -2452,6 +2476,63 @@ function handleScan(value, format) {
   sheetItem(value, format);
 }
 
+// ─── 條碼查商品名稱 ───────────────────────────────────────────────────
+// 商品條碼本身只是一組數字，名稱不在條碼裡，要有外部商品資料庫才查得到。
+// 這裡用 Open Food Facts：免金鑰、開放資料，但以食品飲料為主，
+// 日用品／3C 查不到是常態，查不到就讓使用者自己打，不擋住流程。
+//
+// 刻意不做的事：
+//   1. 不串要 API key 的商業資料庫（Barcodelookup 等）——前端 App 的金鑰
+//      等於公開，任何人都能抽出來用光額度。
+//   2. 不爬電商網站——前端沒有後端可代發請求，瀏覽器直接抓會被 CORS 擋，
+//      而且對方改版就壞、查太頻繁會被封 IP。
+const OFF_API = 'https://world.openfoodfacts.org/api/v2/product/';
+const LOOKUP_TIMEOUT_MS = 6000;
+let lastLookupError = '';
+
+// 查過的結果存起來：同一個商品下次掃就不必再連網，離線也查得到
+function cachedProduct(barcode) {
+  const cache = S.get('barcodeCache', {});
+  return cache[barcode] || null;
+}
+function cacheProduct(barcode, info) {
+  const cache = S.get('barcodeCache', {});
+  cache[barcode] = info;
+  S.set('barcodeCache', cache);
+}
+
+async function lookupProduct(barcode) {
+  const hit = cachedProduct(barcode);
+  if (hit) return { ...hit, source: 'cache' };
+  if (!navigator.onLine) { lastLookupError = '離線中'; return null; }
+
+  // 沒有 AbortSignal.timeout 的舊 WebView 也要能跑，所以自己接 controller
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LOOKUP_TIMEOUT_MS);
+  try {
+    const url = OFF_API + encodeURIComponent(barcode)
+      + '.json?fields=product_name,product_name_zh,brands,quantity';
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) { lastLookupError = 'HTTP ' + res.status; return null; }
+    const data = await res.json();
+    const p = data && data.product;
+    if (!p) { lastLookupError = ''; return null; }          // 查得到伺服器、只是沒這筆
+    const name = (p.product_name_zh || p.product_name || '').trim();
+    const brand = (p.brands || '').split(',')[0].trim();
+    if (!name && !brand) { lastLookupError = ''; return null; }
+    const info = { name: name || brand, brand, qty: (p.quantity || '').trim() };
+    cacheProduct(barcode, info);
+    lastLookupError = '';
+    return { ...info, source: 'net' };
+  } catch (e) {
+    // CORS 被擋、DNS 失敗、逾時都會走到這裡；訊息留給掃描診斷看
+    lastLookupError = (e && e.name === 'AbortError') ? '逾時' : ((e && e.message) || '連線失敗');
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── 底部面板 ─────────────────────────────────────────────────────────
 function openSheet(html) {
   document.getElementById('sheetBody').innerHTML = html;
@@ -2538,7 +2619,12 @@ function sheetItem(code, format) {
     ` : `
       <div class="sheet-field" style="margin-top:14px">
         <div class="sheet-label">物品名稱</div>
-        <input class="budget-input" id="skName" style="width:100%" placeholder="例如：牛奶" autofocus>
+        <div class="sheet-row" style="gap:8px">
+          <input class="budget-input" id="skName" style="flex:1" placeholder="例如：牛奶" autofocus>
+          <button class="btn-ghost" id="skLookupBtn" style="flex:0 0 auto;white-space:nowrap"
+                  onclick="runProductLookup()">查名稱</button>
+        </div>
+        <div class="sheet-sub" id="skLookupStatus" style="margin-top:6px"></div>
       </div>
       <div class="sheet-row">
         <div class="sheet-field" style="flex:0 0 88px">
@@ -2566,6 +2652,43 @@ function sheetItem(code, format) {
       </div>
     `}
   `);
+
+  // 之前查過就直接帶出來（不必連網）；沒查過才看設定要不要自動連網查
+  if (!known) {
+    const hit = cachedProduct(code);
+    if (hit) applyLookupResult({ ...hit, source: 'cache' });
+    else if (S.get('autoLookup', false)) runProductLookup();
+  }
+}
+
+function setLookupStatus(text, tone) {
+  const el = document.getElementById('skLookupStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = tone === 'ok'   ? 'var(--success)'
+                 : tone === 'warn' ? 'var(--warning)'
+                 : 'var(--subtle)';
+}
+
+function applyLookupResult(info) {
+  const input = document.getElementById('skName');
+  if (input && !input.value.trim()) input.value = info.name;   // 不覆蓋使用者已經打的字
+  const extra = [info.brand && info.brand !== info.name ? info.brand : '', info.qty].filter(Boolean).join(' · ');
+  setLookupStatus((info.source === 'cache' ? '之前查過：' : '查到：') + info.name + (extra ? `（${extra}）` : ''), 'ok');
+}
+
+async function runProductLookup() {
+  const code = window.__pendingScanCode || '';
+  if (!code) return;
+  const btn = document.getElementById('skLookupBtn');
+  if (btn) btn.disabled = true;
+  setLookupStatus('查詢中…');
+  const info = await lookupProduct(code);
+  if (btn) btn.disabled = false;
+  if (info) { applyLookupResult(info); return; }
+  setLookupStatus(lastLookupError
+    ? `查不到（${lastLookupError}），直接手動輸入就好`
+    : '這個條碼不在資料庫裡（該庫以食品飲料為主），手動輸入就好', 'warn');
 }
 
 function saveScannedItem() {
@@ -2733,7 +2856,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19c';
+const CONTENT_VERSION = '2026-09-19d';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -2845,6 +2968,11 @@ async function runScanDiag() {
     L.push('上次掃描：尚無紀錄（開一次掃描器再回來看）');
   }
   if (scanLastError) L.push('最近一次錯誤：' + scanLastError);
+  L.push('');
+  L.push('商品名稱查詢：' + (S.get('autoLookup', false) ? '自動查詢已開啟' : '自動查詢已關閉（可在面板手動查）'));
+  L.push('  已快取商品：' + Object.keys(S.get('barcodeCache', {})).length + ' 筆');
+  L.push('  網路狀態：' + (navigator.onLine ? '連線中' : '離線'));
+  if (lastLookupError) L.push('  最近一次查詢失敗：' + lastLookupError);
   el.textContent = L.join('\n');
 }
 
