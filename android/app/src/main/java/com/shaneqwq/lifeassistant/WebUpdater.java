@@ -24,8 +24,12 @@ import java.security.MessageDigest;
  */
 final class WebUpdater {
 
-    /** 內容來源：GitHub Pages 上 main 分支的部署結果 */
-    private static final String BASE = "https://shaneqwq.github.io/mydaughter/";
+    /**
+     * 內容來源：GitHub Pages 上 main 分支的部署結果。
+     * 這裡跟著 repo 的擁有者走——repo 若轉移到別的帳號，Pages 網址也會跟著變，
+     * 這個常數沒一起改的話，App 會永遠抓不到更新（而且是靜默失敗）。
+     */
+    private static final String BASE = "https://shane90314-sketch.github.io/mydaughter/";
     /** 清單抓不到時的退路；正常情況以伺服器上的 web-files.json 為準 */
     private static final String[] FALLBACK_FILES = { "index.html", "manifest.json", "sw.js", "icon.svg", "jsqr.js", "quagga.min.js" };
     private static final String FILE_LIST = "web-files.json";
