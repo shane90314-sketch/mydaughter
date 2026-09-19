@@ -13,3 +13,5 @@ android/local.properties
 # 系統檔
 .DS_Store
 node_modules/
+
+# (CI 驗證用的暫時改動，測試後會刪除此分支)
