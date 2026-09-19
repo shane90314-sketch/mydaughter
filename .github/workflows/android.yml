@@ -72,7 +72,7 @@ jobs:
       # Artifacts 只能在電腦版網頁下載，而且是 zip。
       # 另外發佈成 Release，手機點連結就直接下載 apk，免登入、免解壓縮。
       - name: 發佈到 Releases
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: false  # CI 驗證分支：停用發佈步驟，確保不動到 Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
