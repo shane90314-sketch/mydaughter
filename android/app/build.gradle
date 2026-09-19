@@ -14,9 +14,32 @@ android {
         versionName "1.4"
     }
 
+    // ── 固定簽章金鑰 ──────────────────────────────────────────────
+    // 預設的 debug 金鑰是 Gradle 在建置機器上隨機產生的，每次 CI 執行都不
+    // 一樣，導致新版 APK 因簽章不符而無法覆蓋安裝，使用者每次更新都得先
+    // 卸載、連帶失去 app 內的資料。
+    //
+    // 改用一把固定的 keystore：CI 會從 ANDROID_KEYSTORE_BASE64 secret 解出
+    // android/release.p12，密碼由 ANDROID_KEYSTORE_PASSWORD 提供。
+    // 本機沒有這兩者時自動退回 Gradle 預設 debug 金鑰，手動建置不受影響。
+    def ksFile = rootProject.file('release.p12')
+    def ksPassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+    def useFixedKey = ksFile.exists() && ksPassword
+
+    signingConfigs {
+        fixed {
+            storeType 'PKCS12'
+            storeFile ksFile
+            storePassword ksPassword ?: ''
+            keyAlias 'lifeassistant'
+            keyPassword ksPassword ?: ''
+        }
+    }
+
     buildTypes {
         debug {
-            // 除錯版用 debug 金鑰簽章，可直接側載安裝
+            // 除錯版可直接側載安裝；有固定金鑰時改用它，確保能覆蓋更新
+            if (useFixedKey) signingConfig signingConfigs.fixed
         }
         release {
             minifyEnabled false

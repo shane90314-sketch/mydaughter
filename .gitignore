@@ -13,3 +13,8 @@ android/local.properties
 # 系統檔
 .DS_Store
 node_modules/
+
+# 簽章金鑰由 CI 從 secret 還原，絕不進版控
+android/release.p12
+*.p12
+*.jks
