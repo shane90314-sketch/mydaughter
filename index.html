@@ -966,7 +966,7 @@
         <div class="set-icon"><svg class="ic"><use href="#i-search"/></svg></div>
         <div class="set-info">
           <div class="set-name">掃到條碼自動查商品名稱</div>
-          <div class="set-desc">會把條碼數字送到 Open Food Facts 家族的四個公開資料庫（食品／一般商品／美妝／寵物食品）查詢。關閉時，掃描面板上仍可自己按「查名稱」查一次。</div>
+          <div class="set-desc">會把條碼數字送到 Open Food Facts 家族四個公開資料庫與 UPCitemdb 查詢。查得到不等於正確（那些庫是群眾編輯的），超商自有商品多半查不到。關閉時仍可在掃描面板自己按「查名稱」。</div>
         </div>
         <button class="switch" id="autoLookupToggle"
                 onclick="event.stopPropagation();toggleAutoLookup()"></button>
@@ -2483,17 +2483,29 @@ function handleScan(value, format) {
 // 差別只在網域。只查食品庫的話日用品、美妝、寵物食品都會查不到，
 // 所以四個一起問，誰先有答案就用誰（序列查最糟要等四倍逾時）。
 //
+// 另外再問 UPCitemdb 的免費端點：它是商業條碼庫、涵蓋較廣（非食品、
+// 3C、日用品），免註冊免金鑰。但限制很硬：每天 100 次、每分鐘 6 次，
+// 而且是「以 IP 計」——手機走電信商 NAT 時等於跟陌生人共用額度。
+// 它有沒有放行 CORS 也查不到確切說法，被擋就跟其他來源一樣靜靜失敗，
+// 不影響別的來源，所以放進來試的成本很低。
+//
 // 刻意不做的事：
 //   1. 不串要 API key 的商業資料庫（Barcodelookup、Go-UPC 等）——前端 App
 //      的金鑰等於公開，任何人都能抽出來用光額度。
 //   2. 不爬電商網站——前端沒有後端可代發請求，瀏覽器直接抓會被 CORS 擋，
 //      而且對方改版就壞、查太頻繁會被封 IP。
+//
+// 公開資料庫的本質限制，別對它期待過高：Open Food Facts 家族是群眾編輯的，
+// 「查得到」不等於「正確」；而超商自有商品（7-11、全家那些）的正規資料
+// 握在 GS1 Taiwan 手上、不對外開放查詢，沒有任何免費來源會有。
+// 那一塊只能靠使用者自己命名累積起來的庫（learnProductName）。
 const OFF_INSTANCES = [
   { host: 'world.openfoodfacts.org',     label: '食品' },
   { host: 'world.openproductsfacts.org', label: '一般商品' },
   { host: 'world.openbeautyfacts.org',   label: '美妝' },
   { host: 'world.openpetfoodfacts.org',  label: '寵物食品' }
 ];
+const UPCDB_API = 'https://api.upcitemdb.com/prod/trial/lookup?upc=';
 const LOOKUP_TIMEOUT_MS = 6000;
 let lastLookupError = '';
 
@@ -2540,6 +2552,20 @@ async function queryOffInstance(inst, barcode, signal) {
   return { name: name || brand, brand, qty: (p.quantity || '').trim(), db: inst.label };
 }
 
+// UPCitemdb 的回應格式跟 Open Food Facts 不一樣，另外接一個轉換
+async function queryUpcItemDb(barcode, signal) {
+  const res = await fetch(UPCDB_API + encodeURIComponent(barcode), { signal });
+  if (res.status === 429) throw new Error('UPCitemdb 今日額度已用完');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const it = data && data.items && data.items[0];
+  if (!it) throw new Error('not found');
+  const name = (it.title || '').trim();
+  const brand = (it.brand || '').trim();
+  if (!name && !brand) throw new Error('empty');
+  return { name: name || brand, brand, qty: (it.size || '').trim(), db: 'UPCitemdb' };
+}
+
 async function lookupProduct(barcode) {
   const hit = cachedProduct(barcode);
   if (hit) return { ...hit, source: 'cache' };
@@ -2549,9 +2575,10 @@ async function lookupProduct(barcode) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LOOKUP_TIMEOUT_MS);
   try {
-    const info = await Promise.any(
-      OFF_INSTANCES.map(inst => queryOffInstance(inst, barcode, ctrl.signal))
-    );
+    const info = await Promise.any([
+      ...OFF_INSTANCES.map(inst => queryOffInstance(inst, barcode, ctrl.signal)),
+      queryUpcItemDb(barcode, ctrl.signal)
+    ]);
     cacheProduct(barcode, info);
     lastLookupError = '';
     return { ...info, source: 'net' };
@@ -2894,7 +2921,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19e';
+const CONTENT_VERSION = '2026-09-19f';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
@@ -3008,7 +3035,7 @@ async function runScanDiag() {
   if (scanLastError) L.push('最近一次錯誤：' + scanLastError);
   L.push('');
   L.push('商品名稱查詢：' + (S.get('autoLookup', false) ? '自動查詢已開啟' : '自動查詢已關閉（可在面板手動查）'));
-  L.push('  查詢來源：' + OFF_INSTANCES.map(i => i.label).join('、'));
+  L.push('  查詢來源：' + OFF_INSTANCES.map(i => i.label).join('、') + '、UPCitemdb');
   L.push('  已快取商品：' + Object.keys(S.get('barcodeCache', {})).length + ' 筆');
   L.push('  網路狀態：' + (navigator.onLine ? '連線中' : '離線'));
   if (lastLookupError) L.push('  最近一次查詢失敗：' + lastLookupError);
