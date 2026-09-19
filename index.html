@@ -1099,6 +1099,11 @@
       </div>
     </div>
     <p class="section-label" id="budgetListLabel">本月記錄</p>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="filterBudgetSource('all')" id="bsrc-all" class="chip active-chip">全部</button>
+      <button onclick="filterBudgetSource('scan')" id="bsrc-scan" class="chip">發票掃描</button>
+      <button onclick="filterBudgetSource('manual')" id="bsrc-manual" class="chip">手動輸入</button>
+    </div>
     <div class="card" id="budgetList">
       <div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-wallet"/></svg></div>尚無記帳記錄</div>
     </div>
@@ -1190,6 +1195,11 @@
 
     <p class="section-label">我的物品</p>
     <input type="text" id="itemSearch" class="budget-input" style="width:100%;margin-bottom:10px" placeholder="搜尋物品名稱或位置…" oninput="renderItems()">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="filterItemSource('all')" id="isrc-all" class="chip active-chip">全部</button>
+      <button onclick="filterItemSource('scan')" id="isrc-scan" class="chip">掃描新增</button>
+      <button onclick="filterItemSource('manual')" id="isrc-manual" class="chip">手動新增</button>
+    </div>
     <div class="card" id="itemList">
       <div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>
     </div>
@@ -1698,16 +1708,29 @@ function renderBudget() {
   renderBudgetCatStats(records, expense);
   const list=document.getElementById('budgetList');
   if(!records.length){ list.innerHTML='<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-wallet"/></svg></div>這個月還沒有記錄</div>'; return; }
-  list.innerHTML=records.map(r=>`
+  let listRecords=records;
+  if(budgetSourceFilter==='scan')   listRecords=records.filter(r=>!!r.invoice);
+  if(budgetSourceFilter==='manual') listRecords=records.filter(r=>!r.invoice);
+  if(!listRecords.length){ list.innerHTML='<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>沒有符合條件的記錄</div>'; return; }
+  list.innerHTML=listRecords.map(r=>`
     <div class="budget-item">
       <div class="budget-cat-icon">${catIcon(r.cat)}</div>
       <div class="budget-item-info">
         <div class="budget-item-desc">${escHtml(r.desc||catLabel(r.cat))}</div>
-        <div class="budget-item-date">${escHtml(catLabel(r.cat))} · ${fmtDate(r.ts)}</div>
+        <div class="budget-item-date">${escHtml(catLabel(r.cat))} · ${fmtDate(r.ts)}${r.invoice?'　<svg class="ic" style="width:10px;height:10px;opacity:.6"><use href="#i-receipt"/></svg>':''}</div>
       </div>
       <div class="budget-item-amount ${r.type}">${r.type==='income'?'+':'-'}$${r.amount.toLocaleString()}</div>
       <button class="del-btn" onclick="deleteBudget(${r.id})">✕</button>
     </div>`).join('');
+}
+let budgetSourceFilter='all';
+function filterBudgetSource(f) {
+  budgetSourceFilter=f;
+  ['all','scan','manual'].forEach(v=>{
+    const el=document.getElementById('bsrc-'+v);
+    if(el) el.classList.toggle('active-chip', v===f);
+  });
+  renderBudget();
 }
 
 // 支出分類統計：只看支出（收入分類較少，混在一起意義不大），依金額排序
@@ -2579,6 +2602,16 @@ function daysUntil(dateStr) {
   return Math.round((t - today.getTime()) / 86400000);
 }
 
+let itemSourceFilter = 'all';
+function filterItemSource(f) {
+  itemSourceFilter = f;
+  ['all','scan','manual'].forEach(v=>{
+    const el=document.getElementById('isrc-'+v);
+    if(el) el.classList.toggle('active-chip', v===f);
+  });
+  renderItems();
+}
+
 function renderItems() {
   const items = S.get('items', []);
   const list = document.getElementById('itemList');
@@ -2587,10 +2620,13 @@ function renderItems() {
     list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-box"/></svg></div>還沒有物品</div>';
     return;
   }
+  let filtered = items;
+  if (itemSourceFilter === 'scan')   filtered = filtered.filter(it => !!it.barcode);
+  if (itemSourceFilter === 'manual') filtered = filtered.filter(it => !it.barcode);
   const q = (document.getElementById('itemSearch')?.value || '').trim().toLowerCase();
-  const filtered = q ? items.filter(it =>
+  if (q) filtered = filtered.filter(it =>
     (it.name || '').toLowerCase().includes(q) || (it.place || '').toLowerCase().includes(q)
-  ) : items;
+  );
   if (!filtered.length) {
     list.innerHTML = '<div class="empty"><div class="empty-icon"><svg class="ic"><use href="#i-search"/></svg></div>找不到符合的物品</div>';
     return;
@@ -2646,7 +2682,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-18c';
+const CONTENT_VERSION = '2026-09-19a';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
