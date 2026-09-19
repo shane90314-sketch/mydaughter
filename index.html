@@ -2500,8 +2500,14 @@ function handleScan(value, format) {
     awaitingInvoiceRight = false;
     const extra = parseInvoiceRightQr(value, pendingInvoice.encoding);
     if (extra) {
+      const before = pendingInvoice.items.length;
       pendingInvoice.items = pendingInvoice.items.concat(extra);
-      sheetInvoice(pendingInvoice);
+      // 補掃完還是湊不到宣告的總筆數，多半是這家店只把前幾項放進 QR。
+      // 講清楚，不然使用者會一直重掃同一張找不到的東西。
+      const stillShort = (pendingInvoice.itemTotal || 0) - pendingInvoice.items.length;
+      sheetInvoice(pendingInvoice, stillShort > 0
+        ? `補到 ${pendingInvoice.items.length - before} 項，仍差 ${stillShort} 項。這張發票的 QR 應該沒收錄完整明細，剩下的要到財政部平台查。`
+        : '');
     } else {
       sheetInvoice(pendingInvoice, '那個不是右邊的品項 QR，再對一次試試');
     }
@@ -2672,7 +2678,9 @@ function sheetInvoice(inv, notice) {
 
     ${missing ? `
       <div class="sheet-sub" style="margin-top:10px;color:var(--warning)">
-        還有 ${missing} 項在發票右邊那個 QR 裡，沒掃就只會存到一半品項。
+        這張發票宣告共 ${inv.itemTotal} 項，目前只讀到 ${inv.items.length} 項。
+        剩下的通常在右邊那個 QR，可以補掃；但有些店家只把前兩項放進 QR，
+        那種情況補掃也補不到，完整明細要到財政部平台查。
       </div>
       <button class="btn-ghost" style="width:100%;margin-top:8px" onclick="scanInvoiceRight()">
         <svg class="ic"><use href="#i-scan"/></svg>補掃右邊的 QR
@@ -3015,7 +3023,7 @@ window.__updateStatus = function (message, updated) {
 };
 
 // 內容版本：每次改動網頁時一併更新，方便確認手機上跑的是哪一版
-const CONTENT_VERSION = '2026-09-19g';
+const CONTENT_VERSION = '2026-09-19h';
 
 function initUpdateSection() {
   const el = document.getElementById('updateStatus');
